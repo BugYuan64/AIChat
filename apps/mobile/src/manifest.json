@@ -1,0 +1,56 @@
+{
+  "name": "AIChat",
+  "appid": "",
+  "description": "AIChat 移动客户端（人类与 AI 的聊天）",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "locale": "zh-Hans",
+  "vueVersion": "3",
+  "app-plus": {
+    "usingComponents": true,
+    "nvueStyleCompiler": "uni-app",
+    "compilerVersion": 3,
+    "splashscreen": {
+      "alwaysShowBeforeRender": true,
+      "waiting": true,
+      "autoclose": true,
+      "delay": 0
+    },
+    "modules": {
+      "Scan": {}
+    },
+    "distribute": {
+      "android": {
+        "permissions": [
+          "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+          "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+          "<uses-permission android:name=\"android.permission.CAMERA\"/>",
+          "<uses-permission android:name=\"android.permission.VIBRATE\"/>"
+        ],
+        "abiFilters": ["arm64-v8a"]
+      },
+      "ios": {},
+      "sdkConfigs": {}
+    }
+  },
+  "h5": {
+    "title": "AIChat",
+    "template": "index.html",
+    "router": {
+      "mode": "hash"
+    },
+    "devServer": {
+      "port": 5173,
+      "https": false
+    }
+  },
+  "mp-weixin": {
+    "appid": "",
+    "setting": {
+      "urlCheck": false
+    },
+    "usingComponents": true
+  },
+  "quickapp": {}
+}

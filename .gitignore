@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# 数据与秘密
+*.db
+*.sqlite3
+.env
+tests/e2e/.tmp/
+
+# Node（移动端后续安装）
+node_modules/
+dist/
+
+# 连接器本机凭据
+.aichat-connector/

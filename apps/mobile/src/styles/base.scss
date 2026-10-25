@@ -1,0 +1,225 @@
+/* AIChat 移动端公共样式（App.vue 全局引入，页面内仅补充局部样式） */
+
+page {
+  background: #f5f6f7;
+  font-size: 28rpx;
+  color: #1f2329;
+}
+
+.page {
+  min-height: 100vh;
+  background: #f5f6f7;
+  box-sizing: border-box;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 20rpx;
+  margin: 24rpx;
+  padding: 28rpx;
+}
+
+.section-title {
+  font-size: 26rpx;
+  color: #8a9099;
+  padding: 24rpx 32rpx 8rpx;
+}
+
+.field {
+  margin-bottom: 20rpx;
+}
+.field-label {
+  font-size: 24rpx;
+  color: #8a9099;
+  margin-bottom: 8rpx;
+}
+.input,
+.textarea {
+  width: 100%;
+  background: #f2f3f5;
+  border-radius: 14rpx;
+  padding: 18rpx 20rpx;
+  font-size: 28rpx;
+  box-sizing: border-box;
+}
+.textarea {
+  min-height: 140rpx;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14rpx;
+  padding: 20rpx 0;
+  font-size: 30rpx;
+  background: #e5e7eb;
+  color: #1f2329;
+}
+.btn + .btn {
+  margin-top: 16rpx;
+}
+.btn-primary {
+  background: #3b82f6;
+  color: #ffffff;
+}
+.btn-danger {
+  background: #fee2e2;
+  color: #dc2626;
+}
+.btn-ghost {
+  background: #ffffff;
+  color: #3b82f6;
+  border: 1rpx solid #c7dbfb;
+}
+.btn-small {
+  display: inline-flex;
+  padding: 10rpx 24rpx;
+  font-size: 24rpx;
+  border-radius: 10rpx;
+}
+.btn-disabled {
+  opacity: 0.5;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  padding: 24rpx 32rpx;
+  background: #ffffff;
+  border-bottom: 1rpx solid #f0f1f3;
+}
+.list-body {
+  flex: 1;
+  min-width: 0;
+}
+.list-title {
+  font-size: 30rpx;
+  color: #1f2329;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list-sub {
+  font-size: 24rpx;
+  color: #8a9099;
+  margin-top: 6rpx;
+  word-break: break-all;
+}
+.list-end {
+  margin-left: 16rpx;
+  display: flex;
+  align-items: center;
+}
+
+.avatar {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 16rpx;
+  background: #dbe7fb;
+  color: #3b82f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34rpx;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.avatar.ai {
+  background: #f3e8ff;
+  color: #9333ea;
+}
+
+.badge {
+  min-width: 34rpx;
+  height: 34rpx;
+  border-radius: 17rpx;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 22rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8rpx;
+}
+
+.tag {
+  font-size: 20rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+  background: #eef2f7;
+  color: #5b6472;
+  margin-left: 12rpx;
+  flex-shrink: 0;
+}
+.tag-ai {
+  background: #f3e8ff;
+  color: #9333ea;
+}
+.tag-owner {
+  background: #fef3c7;
+  color: #b45309;
+}
+.tag-admin {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.tag-online {
+  background: #dcfce7;
+  color: #16a34a;
+}
+.tag-offline {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
+.empty {
+  text-align: center;
+  color: #9aa0a6;
+  padding: 120rpx 40rpx;
+  font-size: 26rpx;
+}
+.loading-tip {
+  text-align: center;
+  color: #9aa0a6;
+  font-size: 24rpx;
+  padding: 16rpx 0;
+}
+
+.mask {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.5);
+  z-index: 999;
+  display: flex;
+  align-items: flex-end;
+}
+.sheet {
+  width: 100%;
+  background: #ffffff;
+  border-radius: 24rpx 24rpx 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  max-height: 70vh;
+}
+.sheet-title {
+  text-align: center;
+  padding: 28rpx;
+  font-size: 30rpx;
+  color: #1f2329;
+}
+.sheet-list {
+  max-height: 50vh;
+}
+
+.link {
+  color: #3b82f6;
+  font-size: 26rpx;
+}
+.divider {
+  height: 1rpx;
+  background: #f0f1f3;
+  margin: 20rpx 0;
+}
