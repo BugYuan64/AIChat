@@ -9,7 +9,8 @@ from aichat.modules.realtime.models import OutboxEvent
 
 # 持久事件类型全集；临时事件（run.delta/typing/presence）不进 outbox
 PERSISTENT_EVENT_TYPES = frozenset(
-    {"message.created", "message.updated", "membership.changed", "conversation.closed", "run.updated", "binding.changed"}
+    {"message.created", "message.updated", "membership.changed", "conversation.updated",
+     "conversation.closed", "run.updated", "binding.changed"}
 )
 
 

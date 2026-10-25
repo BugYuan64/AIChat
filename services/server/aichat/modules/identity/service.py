@@ -54,6 +54,53 @@ class IdentityService:
             raise not_found("账号不存在")
         return account
 
+    async def update_profile(self, account_id: str, display_name: str | None,
+                             avatar_url: str | None, bio: str | None) -> Account:
+        account = await self.get_account(account_id)
+        if display_name is not None:
+            account.display_name = display_name
+        if avatar_url is not None:
+            account.avatar_url = avatar_url or None
+        if bio is not None:
+            account.bio = bio or None
+        await self.audit.record("account.profile.update", "account", account.id,
+                                actor_account_id=account_id,
+                                summary={"fields": [k for k, v in
+                                                    (("display_name", display_name), ("avatar_url", avatar_url),
+                                                     ("bio", bio)) if v is not None]})
+        return account
+
+    async def list_sessions(self, account_id: str, current_session_id: str) -> list[dict]:
+        rows = list(await self.session.scalars(
+            select(LoginSession).where(
+                LoginSession.account_id == account_id,
+                LoginSession.revoked_at.is_(None),
+                LoginSession.expires_at > utcnow(),
+            ).order_by(LoginSession.created_at.desc())
+        ))
+        return [
+            {
+                "session_id": row.id,
+                "device_summary": row.device_summary,
+                "created_at": row.created_at.isoformat() + "Z",
+                "last_seen_at": row.last_seen_at.isoformat() + "Z" if row.last_seen_at else None,
+                "expires_at": row.expires_at.isoformat() + "Z",
+                "current": row.id == current_session_id,
+            }
+            for row in rows
+        ]
+
+    async def revoke_session(self, account_id: str, session_id: str) -> LoginSession:
+        login_session = await self.session.get(LoginSession, session_id)
+        if login_session is None or login_session.account_id != account_id:
+            raise not_found("会话不存在")
+        login_session.revoked_at = utcnow()
+        await self.audit.record("session.revoke", "login_session", session_id,
+                                actor_account_id=account_id)
+        # 撤销立即生效：断开该会话签发的全部 WSS 连接
+        await self.ctx.hub.kick_session(session_id)
+        return login_session
+
     async def create_invite(self, admin_account_id: str, note: str | None, expires_days: int, count: int = 1) -> list[Invite]:
         invites = []
         for _ in range(count):
@@ -129,13 +176,15 @@ class IdentityService:
 
     # ---- WSS 票据 ----
 
-    async def create_ws_ticket(self, subject_type: str, subject_id: str, audience: str) -> dict:
+    async def create_ws_ticket(self, subject_type: str, subject_id: str, audience: str,
+                               session_id: str | None = None) -> dict:
         ticket = random_token(24)
         self.session.add(
             WsTicket(
                 id=new_id(),
                 subject_type=subject_type,
                 subject_id=subject_id,
+                session_id=session_id if subject_type == "human" else None,
                 audience=audience,
                 ticket_hash=sha256_hex(ticket),
                 expires_at=utcnow() + timedelta(seconds=self.settings.ws_ticket_seconds),
@@ -159,7 +208,7 @@ class IdentityService:
                     or login_session.expires_at <= utcnow()
                     or account is None or account.status != "active"):
                 raise auth_invalid("登录状态无效")
-            return await self.create_ws_ticket("human", account.id, audience)
+            return await self.create_ws_ticket("human", account.id, audience, session_id=login_session.id)
         if audience == "connector":
             from aichat.modules.pairing.models import Connector
 
@@ -174,12 +223,12 @@ class IdentityService:
             return await self.create_ws_ticket("connector", connector.id, audience)
         raise validation_failed("未知的票据受众")
 
-    async def consume_ws_ticket(self, ticket: str, audience: str) -> str:
-        """一次性消费，返回 subject_id。"""
+    async def consume_ws_ticket(self, ticket: str, audience: str) -> tuple[str, str | None]:
+        """一次性消费，返回 (subject_id, session_id)；session_id 仅人类票据非空。"""
         ws_ticket = await self.session.scalar(
             select(WsTicket).where(WsTicket.ticket_hash == sha256_hex(ticket), WsTicket.audience == audience)
         )
         if ws_ticket is None or ws_ticket.consumed_at is not None or ws_ticket.expires_at <= utcnow():
             raise auth_invalid("实时票据无效或已使用")
         ws_ticket.consumed_at = utcnow()
-        return ws_ticket.subject_id
+        return ws_ticket.subject_id, ws_ticket.session_id

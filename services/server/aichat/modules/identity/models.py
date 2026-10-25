@@ -59,13 +59,14 @@ class Invite(Base):
 
 
 class WsTicket(Base):
-    """一次性 WSS 握手票据，只存哈希。"""
+    """一次性 WSS 握手票据，只存哈希。人类票据绑定签发时的登录会话，撤销会话即断开连接。"""
 
     __tablename__ = "ws_ticket"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     subject_type: Mapped[str] = mapped_column(String(16), nullable=False)  # human | connector
     subject_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    session_id: Mapped[str | None] = mapped_column(String(32))  # 仅 subject_type=human 时填写
     audience: Mapped[str] = mapped_column(String(32), nullable=False)  # human_events | connector
     ticket_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

@@ -43,6 +43,24 @@ export function inviteMembers(conversation_id: string, invitee_account_ids: stri
   });
 }
 
+/** 群主/管理员修改群名 */
+export function renameConversation(conversation_id: string, title: string) {
+  return request<unknown>({
+    url: `/v1/conversations/${encodeURIComponent(conversation_id)}`,
+    method: 'PATCH',
+    data: { title },
+  });
+}
+
+/** 群主任免管理员（admin↔member）或转让群主（owner，原子交换双方角色）；AI 不可任群主/管理员 */
+export function setMemberRole(conversation_id: string, membership_id: string, role: 'owner' | 'admin' | 'member') {
+  return request<unknown>({
+    url: `/v1/conversations/${encodeURIComponent(conversation_id)}/members/${encodeURIComponent(membership_id)}`,
+    method: 'PATCH',
+    data: { role },
+  });
+}
+
 /** 被邀人 / AI 所有者处理邀请 */
 export function decideInvitation(invitation_id: string, decision: 'accept' | 'reject') {
   return request<unknown>({

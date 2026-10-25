@@ -2,7 +2,7 @@
 
 本文是实施阶段的**唯一权威契约**，锁定后端 `services/server`、连接器 `connectors/connector-runner`、移动端 `apps/mobile` 三方共同遵守的接口。与设计文档冲突时以本文为准；修改本文必须同步三方实现。
 
-依据：`项目最终架构.md`（模块划分、技术栈：Python+FastAPI+PostgreSQL）、`docs/AI接入协议.md`（配对与运行协议）、`docs/产品需求.md`（功能范围）。
+依据：`项目最终架构.md`（模块划分、技术栈：Python+FastAPI+PostgreSQL，2026-10-25 经用户批准，见 docs/设计决策与验收.md D-02 修订记录）、`docs/AI接入协议.md`（配对与运行协议）、`docs/产品需求.md`（功能范围）。与 docs/ 设计稿的其余术语/数值差异见本文 §11。
 
 ## 0. 通用约定
 
@@ -62,7 +62,12 @@
 | POST /v1/auth/refresh | refresh_token | 同 login（刷新凭据轮换，旧 token 失效） |
 | POST /v1/auth/logout | Bearer | revoked: true |
 | GET /v1/me | Bearer | account |
+| PATCH /v1/me | Bearer；{display_name?/avatar_url?/bio?}（仅更新提供字段） | account |
+| GET /v1/sessions | Bearer | items: {session_id, device_summary, created_at, last_seen_at, expires_at, current} |
+| DELETE /v1/sessions/{id} | 本人会话 | {session_id, revoked_at}；该会话访问令牌与 WSS 连接立即失效 |
 | POST /v1/realtime-tickets | Bearer；audience=human_events 或 connector | ticket、expires_in |
+
+人类 WSS 票据绑定签发时的登录会话：撤销该会话即断开其建立的连接（服务端 hub 按 session 踢线）。
 
 account 对象：`{account_id, kind: "human"|"ai", handle, display_name, avatar_url?, bio?, status}`。
 
@@ -87,8 +92,10 @@ account 对象：`{account_id, kind: "human"|"ai", handle, display_name, avatar_
 | --- | --- |
 | POST /v1/conversations/direct | {target_account_id, client_request_id}；幂等，已存在返回原会话 |
 | POST /v1/groups | {title, member_account_ids[]}；创建者为群主，其余发邀请 |
-| POST /v1/conversations/{id}/invitations | 群主/管理员邀请；邀请 AI 需其所有者确认（AI 邀请的被邀方=所有者） |
+| PATCH /v1/conversations/{id} | {title} 群主/管理员修改群名 → conversation.updated 事件 + 系统消息 |
+| POST /v1/conversations/{id}/invitations | 群主/管理员邀请；{target_account_id} 或 {invitee_account_ids[]}，返回 {items: [invitation]}；邀请 AI 需其所有者确认（AI 邀请的被邀方=所有者） |
 | POST /v1/invitations/{id}/decision | 被邀人/AI 所有者 accept/reject |
+| PATCH /v1/conversations/{id}/members/{membership_id} | {role: owner/admin/member} 仅群主：任免管理员或转让群主（原子交换双方角色，permission_version+1，系统消息 + membership.changed(change=role)）；AI 不可任群主/管理员；群主不能直接降级自己 |
 | DELETE /v1/conversations/{id}/members/{membership_id} | 移除成员或本人退出；群主先转让或解散 |
 | DELETE /v1/conversations/{id} | 群主解散 |
 | GET /v1/conversations | 列表 + 最后消息摘要 + 未读 |
@@ -119,7 +126,7 @@ message 对象：`{message_id, conversation_id, seq, sender_account_id, kind: "t
 
 `GET /v1/events?after=<cursor>&limit=` → `{items: [{event_id, cursor, type, conversation_id?, seq?, payload, occurred_at}], next_cursor, has_more}`。cursor 过期返回 410 CURSOR_EXPIRED，客户端全量 resync。
 
-持久事件类型：`message.created`、`message.updated`、`membership.changed`、`conversation.closed`、`run.updated`、`binding.changed`。
+持久事件类型：`message.created`、`message.updated`、`membership.changed`（含 change=joined/left/role）、`conversation.updated`（群名等元数据）、`conversation.closed`、`run.updated`、`binding.changed`。
 临时事件（仅 WSS）：`run.delta`、`typing`、`presence`。
 
 ### 5.2 人类 WSS `/v1/realtime`
@@ -217,3 +224,23 @@ contracts/                  本规约 + 生成的 OpenAPI/JSON Schema
 tests/                      跨模块集成测试
 deploy/                     docker-compose 等非秘密部署模板
 ```
+
+## 11. 与设计稿的批准差异
+
+docs/ 下六份设计稿（产品与交互、账号与权限、数据模型、消息与HTTP-WSS契约、统一AI接入、设计决策与验收）是方向权威；实施契约以本文为准。以下差异已经明确决策或记录在案，Wire 层改名不做（三方实现已锁定、纯改名无功能收益）：
+
+| # | 设计稿 | 实施契约 | 状态与说明 |
+| --- | --- | --- | --- |
+| 1 | D-02 服务端 NestJS + TypeScript | Python + FastAPI + SQLAlchemy async | **2026-10-25 用户批准**；D-02 已修订（docs/设计决策与验收.md）。连接器同为 Python，语言统一性成立；移动端仍为 TS/Vue |
+| 2 | 术语 runner（设备执行器） | connector（连接器） | 同一概念。API 前缀 `/v1/connectors/*`、帧前缀 `connector.*`、`run.*` 不改 |
+| 3 | conversation.auth_version | conversation.permission_version | 同一语义（成员/授权变更递增） |
+| 4 | run 状态 queued→leased→running | queued→dispatched→running | leased 对应 dispatched；终态集合一致（succeeded/failed/cancelled），设计稿 unknown 在实施中为 recovery_required |
+| 5 | WSS 路径 /v1/events、/v1/runner/events；信封 v="aichat.v1" | /v1/realtime、/v1/connectors/realtime；信封 protocol_version:1 | 三方已锁定；语义（票据首帧、心跳、cursor）一致 |
+| 6 | 租约 60s/续租 20s；执行 5min；排队 10min | 租约 30s/续租 10s；deadline 120s；排队 5min | 数值默认可配置（core/config.py），收紧不改变协议 |
+| 7 | 配对 pending→approved→consumed，public_reference+user_code | pending_user→pending_local→approved→redeemed，short_code+confirm_code | 实施增加**本机确认**步骤（防陌生人抢扫公开终端二维码）；一次性 device_code 兑换、竞争唯一签发语义一致 |
+| 8 | 工具审批 approval、协作链 collaboration_chain | 未实现 | 设计稿 D6 阶段范围，推迟；当前能力集仅 chat.text/stream/cancel/query，无工具副作用 |
+| 9 | GET /v1/sync-snapshot 快照、delivery-receipts | 未实现 | 一期以会话/消息 HTTP 快照 + 事件补拉恢复；快照端点推迟 |
+| 10 | 人类登录方式未定（D1 待决） | 邀请码注册 + argon2id 密码 + 刷新轮换 | 设计稿允许的实施决策；设备会话管理（§1）已按契约实现 |
+| 11 | 模型凭据在设备侧 runner | 增加服务端 model-binding（加密保管凭据，worker 直接执行 OpenAI 兼容流式） | 产品需求 §6.1 的"模型 API 接入"通路；外部连接器通路并存，二者产出同一 Run/Message/事件 |
+
+后续收敛原则：新增接口优先沿用设计稿命名；上述映射在真机验收与 D5 阶段复审。

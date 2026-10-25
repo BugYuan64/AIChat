@@ -47,7 +47,7 @@ async def connector_ws(websocket: WebSocket) -> None:
         return
     async with ctx.db.session_factory() as session:
         try:
-            connector_id = await IdentityService(ctx, session).consume_ws_ticket(first["ticket"], "connector")
+            connector_id, _ = await IdentityService(ctx, session).consume_ws_ticket(first["ticket"], "connector")
         except ApiError:
             await websocket.close(code=4401)
             return

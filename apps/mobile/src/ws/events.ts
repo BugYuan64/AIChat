@@ -211,7 +211,7 @@ function handleFrame(raw: string): void {
       // 持久事件帧：{"protocol_version":1,"type":"message.created","event_id":"..","cursor":"..",...}
       const pf = frame as unknown as PersistentFrame;
       if (typeof pf.event_id === 'string' && typeof pf.cursor === 'string') {
-        chat.applyEventFrame(pf);
+        chat.applyEventFrame({ ...pf, event_id: pf.event_id, cursor: pf.cursor });
       }
     }
   }

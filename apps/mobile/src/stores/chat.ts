@@ -431,6 +431,17 @@ export const useChatStore = defineStore('chat', {
           delete this.members[frame.conversation_id ?? ''];
           void this.loadConversations().catch(() => {});
           break;
+        case 'conversation.updated': {
+          // 群名等元数据变更：同步列表标题与详情缓存
+          const cid = frame.conversation_id;
+          const title = payload.title;
+          if (cid && typeof title === 'string') {
+            const conv = this.conversations.find((c) => c.conversation_id === cid);
+            if (conv) conv.title = title;
+            if (this.convDetails[cid]) this.convDetails[cid].title = title;
+          }
+          break;
+        }
         case 'conversation.closed':
           if (frame.conversation_id && this.convDetails[frame.conversation_id]) {
             this.convDetails[frame.conversation_id].closed = true;

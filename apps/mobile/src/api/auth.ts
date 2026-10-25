@@ -1,6 +1,6 @@
 /** 认证与账号（PROTOCOL.md §1） */
 import { request } from './client';
-import type { Account, AuthTokens, RealtimeTicket } from './types';
+import type { Account, AuthTokens, LoginSession, ProfilePatch, RealtimeTicket } from './types';
 
 /** 注册走邀请码 */
 export function register(payload: { invite_code: string; handle: string; display_name: string; password: string }) {
@@ -22,6 +22,24 @@ export function logout() {
 
 export function fetchMe() {
   return request<Account>({ url: '/v1/me' });
+}
+
+/** 修改本人资料（仅更新提供字段） */
+export function updateProfile(payload: ProfilePatch) {
+  return request<Account>({ url: '/v1/me', method: 'PATCH', data: payload });
+}
+
+/** 登录设备会话列表（含当前会话标记） */
+export function fetchSessions() {
+  return request<{ items: LoginSession[] }>({ url: '/v1/sessions' });
+}
+
+/** 撤销指定设备会话：其访问令牌与 WSS 连接立即失效 */
+export function revokeSession(session_id: string) {
+  return request<{ session_id: string; revoked_at: string }>({
+    url: `/v1/sessions/${encodeURIComponent(session_id)}`,
+    method: 'DELETE',
+  });
 }
 
 /** 换取人类事件 WSS 票据（30 秒一次性，连接后首帧提交） */

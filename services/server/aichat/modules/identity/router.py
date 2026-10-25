@@ -5,7 +5,16 @@ from aichat.core.context import AppContext
 from aichat.core.db import get_session
 from aichat.core.deps import AuthHuman, current_human, get_ctx, require_admin
 from aichat.core.errors import not_found
-from aichat.modules.identity.schemas import InviteIn, LoginIn, RefreshIn, RegisterIn, TicketIn, account_out, invite_out
+from aichat.modules.identity.schemas import (
+    InviteIn,
+    LoginIn,
+    ProfilePatchIn,
+    RefreshIn,
+    RegisterIn,
+    TicketIn,
+    account_out,
+    invite_out,
+)
 from aichat.modules.identity.service import IdentityService
 
 router = APIRouter(tags=["identity"])
@@ -42,6 +51,26 @@ async def logout(request: Request, auth: AuthHuman = Depends(current_human),
 @router.get("/me")
 async def me(auth: AuthHuman = Depends(current_human), service: IdentityService = Depends(svc)):
     return account_out(await service.get_account(auth.account_id))
+
+
+@router.patch("/me")
+async def update_me(body: ProfilePatchIn, auth: AuthHuman = Depends(current_human),
+                    service: IdentityService = Depends(svc)):
+    return account_out(await service.update_profile(
+        auth.account_id, body.display_name, body.avatar_url, body.bio))
+
+
+@router.get("/sessions")
+async def list_sessions(auth: AuthHuman = Depends(current_human),
+                        service: IdentityService = Depends(svc)):
+    return {"items": await service.list_sessions(auth.account_id, auth.session_id)}
+
+
+@router.delete("/sessions/{session_id}")
+async def revoke_session(session_id: str, auth: AuthHuman = Depends(current_human),
+                         service: IdentityService = Depends(svc)):
+    login_session = await service.revoke_session(auth.account_id, session_id)
+    return {"session_id": login_session.id, "revoked_at": login_session.revoked_at.isoformat() + "Z"}
 
 
 @router.post("/realtime-tickets")

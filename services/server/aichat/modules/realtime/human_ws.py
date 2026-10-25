@@ -32,7 +32,8 @@ async def realtime_ws(websocket: WebSocket) -> None:
         return
     async with ctx.db.session_factory() as session:
         try:
-            account_id = await IdentityService(ctx, session).consume_ws_ticket(first["ticket"], "human_events")
+            account_id, session_id = await IdentityService(ctx, session).consume_ws_ticket(
+                first["ticket"], "human_events")
         except ApiError:
             await websocket.close(code=4401)
             return
@@ -42,7 +43,7 @@ async def realtime_ws(websocket: WebSocket) -> None:
         stream_row = await session.get(EventStream, account_id)
         last_cursor = stream_row.last_cursor if stream_row is not None else 0
 
-    conn = HumanConnection(account_id=account_id, drain=lambda: None)
+    conn = HumanConnection(account_id=account_id, drain=lambda: None, session_id=session_id)
     sent_lock = asyncio.Lock()
 
     async def drain() -> None:

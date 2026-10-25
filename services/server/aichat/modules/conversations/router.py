@@ -5,14 +5,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aichat.core.db import get_session
 from aichat.core.deps import AuthHuman, current_human
+from aichat.core.errors import forbidden, validation_failed
 from aichat.modules.conversations.models import GroupInvitation
 from aichat.modules.conversations.schemas import (
     DirectIn,
     GroupIn,
     InvitationDecisionIn,
     InviteIn,
+    RenameIn,
+    RoleIn,
     conversation_out,
     invitation_out,
+    membership_out,
 )
 from aichat.modules.conversations.service import ConversationsService
 from aichat.modules.identity.models import Account
@@ -56,8 +60,13 @@ async def conversation_detail(conversation_id: str, auth: AuthHuman = Depends(cu
 @router.post("/conversations/{conversation_id}/invitations")
 async def invite(conversation_id: str, body: InviteIn, auth: AuthHuman = Depends(current_human),
                  service: ConversationsService = Depends(svc)):
-    invitation = await service.invite(conversation_id, auth.account_id, body.target_account_id)
-    return invitation_out(invitation)
+    try:
+        target_ids = body.target_ids()
+    except ValueError as exc:
+        raise validation_failed(str(exc)) from exc
+    invitations = [await service.invite(conversation_id, auth.account_id, target_id)
+                   for target_id in target_ids]
+    return {"items": [invitation_out(i) for i in invitations]}
 
 
 @router.get("/conversations/{conversation_id}/invitations")
@@ -65,8 +74,6 @@ async def list_invitations(conversation_id: str, auth: AuthHuman = Depends(curre
                            service: ConversationsService = Depends(svc)):
     membership = await service.messages.active_membership(conversation_id, auth.account_id)
     if membership is None or membership.role not in ("owner", "admin"):
-        from aichat.core.errors import forbidden
-
         raise forbidden("只有群主或管理员可以查看邀请")
     rows = list(await service.session.scalars(
         select(GroupInvitation).where(
@@ -90,6 +97,23 @@ async def remove_member(conversation_id: str, membership_id: str, auth: AuthHuma
                         service: ConversationsService = Depends(svc)):
     membership = await service.remove_member(conversation_id, auth.account_id, membership_id)
     return {"membership_id": membership.id, "left_seq": str(membership.left_seq)}
+
+
+@router.patch("/conversations/{conversation_id}")
+async def rename_group(conversation_id: str, body: RenameIn,
+                       auth: AuthHuman = Depends(current_human),
+                       service: ConversationsService = Depends(svc)):
+    conv = await service.rename_group(conversation_id, auth.account_id, body.title)
+    return conversation_out(conv)
+
+
+@router.patch("/conversations/{conversation_id}/members/{membership_id}")
+async def set_member_role(conversation_id: str, membership_id: str, body: RoleIn,
+                          auth: AuthHuman = Depends(current_human),
+                          service: ConversationsService = Depends(svc)):
+    membership = await service.set_member_role(
+        conversation_id, auth.account_id, membership_id, body.role)
+    return membership_out(membership)
 
 
 @router.delete("/conversations/{conversation_id}")

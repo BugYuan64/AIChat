@@ -291,6 +291,88 @@ class ConversationsService:
         await self.audit.record("conversation.dissolve", "conversation", conv.id, actor_account_id=actor_id)
         return conv
 
+    async def rename_group(self, conversation_id: str, actor_id: str, title: str) -> Conversation:
+        conv = await self.messages.get_conversation(conversation_id, lock=True)
+        if conv.kind != "group" or conv.status != "active":
+            raise validation_failed("仅活跃群聊支持改名")
+        actor_membership = await self.messages.active_membership(conversation_id, actor_id)
+        if actor_membership is None or actor_membership.role not in ("owner", "admin"):
+            raise forbidden("只有群主或管理员可以修改群名")
+        old_title = conv.title
+        conv.title = title
+        actor = await self.session.get(Account, actor_id)
+        display = actor.display_name if actor else actor_id
+        await self.messages.create_system_message(conv, f"{display} 修改群名为「{title}」")
+        await emit(self.session, "conversation.updated",
+                  {"conversation_id": conv.id, "title": title, "previous_title": old_title,
+                   "permission_version": conv.permission_version},
+                  conversation_id=conv.id)
+        await self.audit.record("conversation.rename", "conversation", conv.id,
+                                actor_account_id=actor_id, summary={"title": title})
+        return conv
+
+    async def set_member_role(self, conversation_id: str, actor_id: str,
+                              membership_id: str, role: str) -> MembershipInterval:
+        """群主任免管理员（admin↔member）或转让群主（owner，原子交换双方角色）。"""
+        conv = await self.messages.get_conversation(conversation_id, lock=True)
+        if conv.kind != "group" or conv.status != "active":
+            raise validation_failed("仅活跃群聊支持角色管理")
+        actor_membership = await self.messages.active_membership(conversation_id, actor_id)
+        if actor_membership is None or actor_membership.role != "owner":
+            raise forbidden("只有群主可以任免管理员或转让群主")
+        membership = await self.session.get(MembershipInterval, membership_id)
+        if membership is None or membership.conversation_id != conversation_id or membership.left_at is not None:
+            raise not_found("成员不存在")
+        account = await self.session.get(Account, membership.account_id)
+        if account is None:
+            raise not_found("成员不存在")
+        if account.kind != "human":
+            raise validation_failed("AI 账号不能担任群主或管理员")
+        old_role = membership.role
+        if role == "owner":
+            if membership.account_id == actor_id:
+                raise validation_failed("不能把群主转让给自己")
+            # 转让群主：目标成为 owner，原群主降为 member，同事务原子生效
+            membership.role = "owner"
+            actor_membership.role = "member"
+        elif role in ("admin", "member"):
+            if membership.account_id == actor_id:
+                raise forbidden("群主不能直接降级自己，需先转让群主或解散群聊")
+            if membership.role == role:
+                return membership  # 幂等：角色未变化
+            membership.role = role
+        else:
+            raise validation_failed("未知角色")
+        conv.permission_version += 1
+        display = account.display_name
+        if role == "owner":
+            actor = await self.session.get(Account, actor_id)
+            actor_display = actor.display_name if actor else actor_id
+            text = f"{actor_display} 将群主转让给 {display}"
+        elif role == "admin":
+            text = f"{display} 成为管理员"
+        else:
+            text = f"{display} 不再是管理员"
+        await self.messages.create_system_message(conv, text)
+        await emit(
+            self.session, "membership.changed",
+            {
+                "conversation_id": conv.id,
+                "membership_id": membership.id,
+                "account_id": membership.account_id,
+                "change": "role",
+                "role": membership.role,
+                "previous_role": old_role,
+                "permission_version": conv.permission_version,
+                "subject_account_id": membership.account_id,
+            },
+            conversation_id=conv.id,
+            subject_account_ids=[membership.account_id],
+        )
+        await self.audit.record("member.role", "conversation", conv.id, actor_account_id=actor_id,
+                                summary={"membership": membership_id, "role": role, "previous": old_role})
+        return membership
+
     # ---- 查询 ----
 
     async def list_for_account(self, account_id: str, limit: int = 100) -> list[dict]:

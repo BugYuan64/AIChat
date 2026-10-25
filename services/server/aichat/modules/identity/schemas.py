@@ -28,6 +28,12 @@ class InviteIn(BaseModel):
     count: int = Field(default=1, ge=1, le=50)
 
 
+class ProfilePatchIn(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=128)
+    avatar_url: str | None = Field(default=None, max_length=1024)
+    bio: str | None = Field(default=None, max_length=2048)
+
+
 def account_out(account) -> dict:
     return {
         "account_id": account.id,

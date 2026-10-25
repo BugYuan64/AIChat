@@ -12,11 +12,29 @@ class GroupIn(BaseModel):
 
 
 class InviteIn(BaseModel):
-    target_account_id: str
+    """兼容两种形式：单个 target_account_id 或批量 invitee_account_ids。"""
+
+    target_account_id: str | None = None
+    invitee_account_ids: list[str] = Field(default_factory=list, max_length=100)
+
+    def target_ids(self) -> list[str]:
+        ids = [self.target_account_id] if self.target_account_id else []
+        ids.extend(i for i in self.invitee_account_ids if i not in ids)
+        if not ids:
+            raise ValueError("缺少被邀请账号")
+        return ids
 
 
 class InvitationDecisionIn(BaseModel):
     decision: str = Field(pattern=r"^(accept|reject)$")
+
+
+class RenameIn(BaseModel):
+    title: str = Field(min_length=1, max_length=128)
+
+
+class RoleIn(BaseModel):
+    role: str = Field(pattern=r"^(owner|admin|member)$")
 
 
 def membership_out(m) -> dict:

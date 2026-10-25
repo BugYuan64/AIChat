@@ -6,12 +6,19 @@
     <template v-if="detail">
       <!-- 群信息 -->
       <view class="card">
-        <view class="group-title">{{ detail.title || '群聊' }}</view>
+        <view class="row-line">
+          <view class="group-title">{{ detail.title || '群聊' }}</view>
+          <text v-if="canManage && !closed" class="rename-btn" @tap="startRename">改名</text>
+        </view>
         <view class="list-sub">
           {{ detail.kind === 'group' ? '群聊' : '私聊' }} · {{ detail.members.length }} 名成员
           <text v-if="closed" class="tag tag-offline">已解散</text>
         </view>
         <view class="list-sub">ID：{{ detail.conversation_id }}</view>
+        <view v-if="renaming" class="rename-box">
+          <input v-model="renameInput" class="input" placeholder="新群名（1-128 字符）" maxlength="128" />
+          <view class="btn btn-primary btn-small" @tap="confirmRename">保存</view>
+        </view>
       </view>
 
       <!-- 成员 -->
@@ -33,8 +40,12 @@
           </view>
           <view class="list-sub">@{{ m.account.handle }}</view>
         </view>
-        <view class="list-end" v-if="canManage && m.account.account_id !== myAccountId && !closed">
-          <view class="btn btn-danger btn-small" @tap="removeMember(m)">移除</view>
+        <view
+          class="list-end member-actions"
+          v-if="!closed && m.account.account_id !== myAccountId"
+        >
+          <view v-if="canManage" class="btn btn-danger btn-small" @tap="removeMember(m)">移除</view>
+          <text v-if="canManageRoles(m)" class="role-btn" @tap="openRoleActions(m)">角色</text>
         </view>
       </view>
 
@@ -44,7 +55,6 @@
         <view v-if="!isOwner" class="btn btn-ghost" @tap="leaveGroup">退出群聊</view>
         <view v-else class="btn btn-ghost btn-disabled">群主退出前需转让群主或解散群</view>
         <view v-if="isOwner" class="btn btn-danger" @tap="dissolve">解散群聊</view>
-        <view class="foot-tip">修改群名 / 任命管理员 / 转让群主的接口暂未在 PROTOCOL.md §3 中定义，当前版本未实现。</view>
       </view>
     </template>
 
@@ -142,6 +152,86 @@ function toggleInvite(accountId: string) {
   else inviteIds.value.push(accountId);
 }
 
+/* ---- 群改名（群主/管理员） ---- */
+
+const renaming = ref(false);
+const renameInput = ref('');
+
+function startRename() {
+  renameInput.value = detail.value?.title ?? '';
+  renaming.value = true;
+}
+
+async function confirmRename() {
+  const title = renameInput.value.trim();
+  if (!title) {
+    uni.showToast({ title: '群名不能为空', icon: 'none' });
+    return;
+  }
+  try {
+    await chatApi.renameConversation(conversationId.value, title);
+    renaming.value = false;
+    uni.showToast({ title: '已修改', icon: 'success' });
+    await load();
+    await chatStore.loadConversations().catch(() => {});
+  } catch (e) {
+    uni.showToast({ title: describeError(e), icon: 'none' });
+  }
+}
+
+/* ---- 角色管理（仅群主：任免管理员 / 转让群主） ---- */
+
+/** 群主可对其他人类成员操作角色；AI 不可任群主或管理员 */
+function canManageRoles(m: ConversationMember): boolean {
+  return isOwner.value && m.account.kind === 'human';
+}
+
+function openRoleActions(m: ConversationMember) {
+  const actions: string[] = [];
+  if (m.role === 'admin') actions.push('取消管理员');
+  else actions.push('设为管理员');
+  actions.push('转让群主');
+  uni.showActionSheet({
+    itemList: actions,
+    success: (res) => {
+      const picked = actions[res.tapIndex];
+      if (picked === '设为管理员') void applyRole(m, 'admin');
+      else if (picked === '取消管理员') void applyRole(m, 'member');
+      else confirmTransfer(m);
+    },
+  });
+}
+
+function applyRole(m: ConversationMember, role: 'admin' | 'member') {
+  return (async () => {
+    try {
+      await chatApi.setMemberRole(conversationId.value, m.membership_id, role);
+      uni.showToast({ title: role === 'admin' ? '已设为管理员' : '已取消管理员', icon: 'none' });
+      await load();
+    } catch (e) {
+      uni.showToast({ title: describeError(e), icon: 'none' });
+    }
+  })();
+}
+
+function confirmTransfer(m: ConversationMember) {
+  uni.showModal({
+    title: '转让群主',
+    content: `将群主转让给 ${m.account.display_name || m.account.handle}？你将成为普通成员。`,
+    confirmText: '转让',
+    success: async (res) => {
+      if (!res.confirm) return;
+      try {
+        await chatApi.setMemberRole(conversationId.value, m.membership_id, 'owner');
+        uni.showToast({ title: '已转让', icon: 'none' });
+        await load();
+      } catch (e) {
+        uni.showToast({ title: describeError(e), icon: 'none' });
+      }
+    },
+  });
+}
+
 async function invite() {
   if (!inviteIds.value.length) return;
   try {
@@ -221,10 +311,30 @@ function dissolve() {
   font-size: 34rpx;
   font-weight: 600;
 }
-.foot-tip {
+.rename-btn {
+  margin-left: auto;
+  font-size: 24rpx;
+  color: #3b82f6;
+  padding: 4rpx 12rpx;
+}
+.rename-box {
+  display: flex;
+  gap: 16rpx;
+  align-items: center;
   margin-top: 20rpx;
-  font-size: 22rpx;
-  color: #b6bcc4;
+  .input {
+    flex: 1;
+  }
+}
+.member-actions {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+.role-btn {
+  font-size: 24rpx;
+  color: #3b82f6;
+  padding: 8rpx 16rpx;
 }
 .checkbox {
   width: 40rpx;

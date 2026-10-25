@@ -191,8 +191,8 @@ export interface RequestOptions {
   /** 以 /v1 开头的路径 */
   url: string;
   method?: HttpMethod;
-  /** 请求体（POST/PUT/PATCH/DELETE） */
-  data?: Record<string, unknown>;
+  /** 请求体（POST/PUT/PATCH/DELETE）；接口对象类型即可，无需索引签名 */
+  data?: object;
   /** 查询参数（undefined/空串跳过） */
   query?: Record<string, string | number | undefined>;
   /** 是否携带 Bearer；默认 true（登录/注册/刷新自身为 false） */
@@ -222,8 +222,9 @@ function rawRequest<T>(opts: RequestOptions): Promise<T> {
     }
     uni.request({
       url: getServerBase() + buildUrl(opts.url, opts.query),
-      method: opts.method ?? 'GET',
-      data: opts.data as Record<string, unknown> | undefined,
+      // @dcloudio/types 的 method 联合未列出 PATCH（类型滞后）：H5/App 运行时均支持，小程序阶段复测
+      method: (opts.method ?? 'GET') as 'GET',
+      data: opts.data,
       header,
       timeout: opts.timeoutMs ?? 15000,
       success: (res) => {

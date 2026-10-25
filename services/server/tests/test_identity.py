@@ -65,8 +65,63 @@ async def test_ws_ticket_flow(client, ctx):
 
     async with ctx.db.session_factory() as session:
         service = IdentityService(ctx, session)
-        account_id = await service.consume_ws_ticket(value, "human_events")
+        account_id, session_id = await service.consume_ws_ticket(value, "human_events")
         assert account_id == alice["account_id"]
+        assert session_id  # 人类票据绑定登录会话
         with pytest.raises(Exception):
             await service.consume_ws_ticket(value, "human_events")
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_profile_update(client, ctx):
+    _, invites = await make_admin(ctx)
+    alice = await register_user(client, invites[0], "alice")
+    ha = {"Authorization": f"Bearer {alice['token']}"}
+
+    patched = await client.patch("/v1/me", json={
+        "display_name": "爱丽丝", "bio": "一句话简介",
+    }, headers=ha)
+    assert patched.status_code == 200
+    assert patched.json()["data"]["display_name"] == "爱丽丝"
+    assert patched.json()["data"]["bio"] == "一句话简介"
+
+    # 空昵称被拒
+    bad = await client.patch("/v1/me", json={"display_name": ""}, headers=ha)
+    assert bad.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_session_management(client, ctx):
+    _, invites = await make_admin(ctx)
+    alice = await register_user(client, invites[0], "alice")  # 设备 A
+
+    # 设备 B 再登录一次
+    second = await client.post("/v1/auth/login", json={
+        "handle": "alice", "password": "password-123456", "device_summary": "Pixel 8",
+    })
+    assert second.status_code == 200
+    hb = {"Authorization": f"Bearer {second.json()['data']['access_token']}"}
+
+    ha = {"Authorization": f"Bearer {alice['token']}"}
+    sessions = await client.get("/v1/sessions", headers=ha)
+    assert sessions.status_code == 200
+    items = sessions.json()["data"]["items"]
+    assert len(items) == 2
+    assert sum(1 for i in items if i["current"]) == 1
+    other = next(i for i in items if not i["current"])
+    assert other["device_summary"] == "Pixel 8"
+
+    # 撤销设备 B 的会话：其访问令牌立即失效，设备 A 不受影响
+    revoked = await client.delete(f"/v1/sessions/{other['session_id']}", headers=ha)
+    assert revoked.status_code == 200
+    me_b = await client.get("/v1/me", headers=hb)
+    assert me_b.status_code == 401
+    me_a = await client.get("/v1/me", headers=ha)
+    assert me_a.status_code == 200
+
+    # 不能撤销别人的会话（不可见）
+    bob = await register_user(client, invites[1], "bob")
+    stranger = await client.delete(f"/v1/sessions/{other['session_id']}",
+                                   headers={"Authorization": f"Bearer {bob['token']}"})
+    assert stranger.status_code == 404

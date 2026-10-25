@@ -73,6 +73,24 @@ export interface RealtimeTicket {
   expires_in: number;
 }
 
+/** GET /v1/sessions 的 items 元素：登录设备会话 */
+export interface LoginSession {
+  session_id: string;
+  device_summary?: string;
+  created_at: string;
+  last_seen_at?: string;
+  expires_at: string;
+  /** 是否为当前请求所用会话 */
+  current: boolean;
+}
+
+/** PATCH /v1/me 载荷（字段均可选，仅更新提供者） */
+export interface ProfilePatch {
+  display_name?: string;
+  avatar_url?: string;
+  bio?: string;
+}
+
 /* ---------------- 联系人（§2） ---------------- */
 
 /** 关系值以服务端实现为准；pending_* 用于驱动“待处理申请”列表 */
@@ -221,6 +239,7 @@ export type PersistentEventType =
   | 'message.created'
   | 'message.updated'
   | 'membership.changed'
+  | 'conversation.updated'
   | 'conversation.closed'
   | 'run.updated'
   | 'binding.changed';
