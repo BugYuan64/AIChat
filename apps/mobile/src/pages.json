@@ -1,0 +1,61 @@
+{
+  "pages": [
+    {
+      "path": "pages/login/login",
+      "style": { "navigationBarTitleText": "登录 AIChat" }
+    },
+    {
+      "path": "pages/sessions/sessions",
+      "style": { "navigationBarTitleText": "会话", "enablePullDownRefresh": true }
+    },
+    {
+      "path": "pages/contacts/contacts",
+      "style": { "navigationBarTitleText": "联系人", "enablePullDownRefresh": true }
+    },
+    {
+      "path": "pages/me/me",
+      "style": { "navigationBarTitleText": "我的" }
+    },
+    {
+      "path": "pages/chat/chat",
+      "style": { "navigationBarTitleText": "聊天", "app-plus": { "bounce": "none" } }
+    },
+    {
+      "path": "pages/agents/agents",
+      "style": { "navigationBarTitleText": "我的 AI" }
+    },
+    {
+      "path": "pages/agents/detail",
+      "style": { "navigationBarTitleText": "AI 详情" }
+    },
+    {
+      "path": "pages/group/settings",
+      "style": { "navigationBarTitleText": "群设置" }
+    },
+    {
+      "path": "pages/pairing/scan",
+      "style": { "navigationBarTitleText": "连接器配对" }
+    },
+    {
+      "path": "pages/runs/detail",
+      "style": { "navigationBarTitleText": "运行详情" }
+    }
+  ],
+  "tabBar": {
+    "color": "#8a9099",
+    "selectedColor": "#3b82f6",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      { "pagePath": "pages/sessions/sessions", "text": "会话" },
+      { "pagePath": "pages/contacts/contacts", "text": "联系人" },
+      { "pagePath": "pages/me/me", "text": "我的" }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "AIChat",
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f5f6f7"
+  }
+}

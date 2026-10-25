@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aichat
+      POSTGRES_USER: aichat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 设置 POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aichat"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ../services/server
+      dockerfile: Dockerfile
+    environment:
+      AICHAT_ENV: prod
+      AICHAT_DATABASE_URL: postgresql+asyncpg://aichat:${POSTGRES_PASSWORD}@postgres:5432/aichat
+      AICHAT_JWT_SECRET: ${AICHAT_JWT_SECRET:?请在 .env 设置强随机 AICHAT_JWT_SECRET}
+      AICHAT_CREDENTIAL_MASTER_KEY: ${AICHAT_CREDENTIAL_MASTER_KEY:?请设置 Fernet 主密钥}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"  # 生产应置于 TLS 反向代理之后
+    command: >
+      sh -c "python -m alembic upgrade head &&
+             python -m aichat.bootstrap admin --handle admin --password \"${ADMIN_BOOTSTRAP_PASSWORD:-change-me-immediately}\" &&
+             python -m uvicorn aichat.app:app --host 0.0.0.0 --port 8000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
