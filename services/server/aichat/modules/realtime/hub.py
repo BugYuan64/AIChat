@@ -14,10 +14,11 @@ class HumanConnection:
     session_id 为签发票据的登录会话；撤销该会话时按它精准断开对应设备连接。
     """
 
-    def __init__(self, account_id: str, drain, session_id: str | None = None) -> None:
+    def __init__(self, account_id: str, drain, session_id: str | None = None, close=None) -> None:
         self.account_id = account_id
         self.session_id = session_id
         self._drain = drain
+        self._close = close
         self.alive = True
         self.last_activity: datetime | None = None
 
@@ -70,13 +71,18 @@ class RealtimeHub:
     async def kick_session(self, session_id: str) -> int:
         """撤销登录会话后断开其全部 WSS 连接；返回断开数量。"""
         kicked = 0
+        closing = []
         async with self._lock:
             for conns in list(self._humans.values()):
                 for conn in list(conns):
                     if conn.session_id == session_id:
                         conn.alive = False
                         conns.discard(conn)
+                        if conn._close is not None:
+                            closing.append(conn._close())
                         kicked += 1
+        if closing:
+            await asyncio.gather(*closing, return_exceptions=True)
         return kicked
 
     async def add_connector(self, conn: ConnectorConnection) -> ConnectorConnection | None:

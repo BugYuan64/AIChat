@@ -1,5 +1,7 @@
 from functools import lru_cache
 
+from cryptography.fernet import Fernet
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,6 +12,8 @@ class Settings(BaseSettings):
 
     env: str = "dev"
     database_url: str = "sqlite+aiosqlite:///./aichat.db"
+    public_base_url: str = ""
+    cors_origins: list[str] = Field(default_factory=list)
 
     # 认证
     jwt_secret: str = "dev-only-secret-change-me"
@@ -64,6 +68,19 @@ class Settings(BaseSettings):
     # 事件推送循环
     fanout_poll_seconds: float = 0.3
     run_loop_seconds: float = 0.5
+
+    @model_validator(mode="after")
+    def require_production_secrets(self):
+        if self.is_prod:
+            if len(self.jwt_secret.encode("utf-8")) < 32:
+                raise ValueError("Production AICHAT_JWT_SECRET must contain at least 32 bytes")
+            if not self.credential_master_key:
+                raise ValueError("Production AICHAT_CREDENTIAL_MASTER_KEY is required")
+            try:
+                Fernet(self.credential_master_key.encode("ascii"))
+            except (ValueError, UnicodeError) as exc:
+                raise ValueError("AICHAT_CREDENTIAL_MASTER_KEY must be a valid Fernet key") from exc
+        return self
 
     @property
     def is_prod(self) -> bool:

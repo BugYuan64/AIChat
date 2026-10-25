@@ -6,6 +6,8 @@
 
 ## 0. 通用约定
 
+部署地址（2026-10-26）：H5 使用 `https://aichat.wsnbb.shop`；REST 基址使用 `https://api.aichat.wsnbb.shop`，WSS 使用相同 API 主机。后端允许精确的 H5 Origin 跨域 Bearer 请求，无跨域 Cookie。配对二维码的可点击入口仍使用 H5 域名。
+
 - REST 前缀 `/v1`，Content-Type `application/json`。
 - ID 为不透明字符串（UUID hex）；时间为 UTC RFC3339；`seq`/`cursor`/`revision` 等大数一律**十进制字符串**序列化。
 - 成功响应：`{"request_id": "...", "data": {...}}`；错误响应：`{"request_id": "...", "error": {"code": "...", "message": "...", "retryable": bool, "retry_after_ms": int?}}`。
@@ -79,8 +81,9 @@ account 对象：`{account_id, kind: "human"|"ai", handle, display_name, avatar_
 | --- | --- |
 | GET /v1/accounts/by-handle?handle= | 精确查找，返回有限资料 |
 | POST /v1/contact-requests | {target_account_id}；AI 目标由其所有者审批 |
+| GET /v1/contact-requests | 待处理申请；items: {request_id, status, requester_account_id, target_account_id, direction: incoming/outgoing, account, created_at}；account 是当前查看者的对方账号，AI 所有者可查看自己 AI 收到的申请 |
 | POST /v1/contact-requests/{id}/decision | {decision: accept/reject} |
-| GET /v1/contacts | items: account + 关系 |
+| GET /v1/contacts | items: 已建立关系的有限 account；待处理申请另取 /v1/contact-requests，客户端组合成关系视图 |
 | DELETE /v1/contacts/{account_id} | 移除联系人（阻止新私聊，历史保留） |
 | POST /v1/contacts/{account_id}/block | 拉黑（方向性） |
 
@@ -146,7 +149,9 @@ message 对象：`{message_id, conversation_id, seq, sender_account_id, kind: "t
 | PATCH /v1/agents/{id} | {display_name?/status?} |
 | POST /v1/agents/{id}/model-binding | {provider_code, credential(secret), model_name, system_prompt?}；服务端加密保存，测试通过启用 |
 | POST /v1/agents/{id}/binding/revoke | 撤销绑定，generation+1，取消在途运行 |
-| POST /v1/agents/{id}/grants | {human_account_id} 授权使用 / DELETE 撤销 |
+| POST /v1/agents/{id}/grants | {human_account_id} 授权使用 |
+| GET /v1/agents/{id}/grants | 所有者查看授权列表 |
+| DELETE /v1/agents/{id}/grants/{human_account_id} | 撤销指定人类的使用授权 |
 | GET /v1/agents/{id}/connectors | 所有者查看已绑定连接器 |
 
 供应商端点白名单由管理员维护（表 provider_endpoint），协议 openai_chat（OpenAI 兼容 chat/completions）。
@@ -188,9 +193,11 @@ qr_payload 形如 `https://<host>/pair?pid=<pairing_id>&code=<short_code>`，不
 | run.cancel | S→C | reason |
 | run.cancelled | C→S | side_effect_status |
 | run.query | C→S | execution_id（重连时查询既有执行） |
-| run.status | S→C | state, attempt_no, fencing_token, may_continue |
+| run.status | S→C | state, attempt_no, fencing_token, may_continue, next_chunk_index（服务端已持久化的最后 chunk_index + 1） |
 
 连接器必须按 execution_id 在本地账本持久去重；断线重连先 run.query 附着原执行，不新建。旧 fencing_token 提交返回 409 STALE_FENCE 帧。delta 重复同序号同内容幂等，不同内容 IDEMPOTENCY_CONFLICT；缺片返回 DELTA_GAP + next_chunk_index。
+
+结果发送前先持久化为 `completion_pending`，仅在 run.status 确认服务端终态后结束本地恢复；重放从 next_chunk_index 开始。运行错误帧携带 execution_id，DELTA_GAP 另带 next_chunk_index。以上扩展已同步服务端与连接器，移动端不直接消费连接器帧。
 
 ## 8. 运行（runs）
 

@@ -126,7 +126,8 @@ class ContactsService:
         ))
         result = []
         for row in rows:
-            account = await self.session.get(Account, row.requester_id)
+            counterpart_id = row.target_id if row.requester_id == account_id else row.requester_id
+            account = await self.session.get(Account, counterpart_id)
             result.append((row, account))
         return result
 

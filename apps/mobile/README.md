@@ -2,7 +2,13 @@
 
 uni-app + Vue 3 + TypeScript + Pinia 的 AIChat 移动客户端源码脚手架。接口严格遵循 [`contracts/PROTOCOL.md`](../../contracts/PROTOCOL.md)（唯一权威契约），页面职责对应 [`docs/产品需求.md`](../../docs/产品需求.md) 第 7 节。
 
-> 本目录只包含源码与配置，未执行 `npm install`，不含 `node_modules`，不含任何二进制资源与真实密钥。
+> 源码与锁文件纳入版本管理，依赖和构建产物保持忽略。2026-10-25 本地已执行依赖安装、TypeScript 检查和 H5 构建；Android/小程序真机尚未验收。
+
+uni-app 配套包固定为 `3.0.0-4020920240930001`，Vue 固定为 `3.4.21`、Pinia 为 `2.1.7`，
+避免使用宽泛预发布范围混装不兼容插件。复现使用 `npm ci`，随后执行 `npm test`、`npm run type-check` 和 `npm run build:h5`。
+当前工具链仍有传递依赖漏洞告警，见 [项目审核记录](../../docs/项目审核记录.md)；H5 构建成功不代表完成浏览器和生产安全验收。
+
+正式 H5 为 `https://aichat.wsnbb.shop`，所有平台后端基址为 `https://api.aichat.wsnbb.shop`。发布构建设 `VITE_AICHAT_SERVER` 为后者；路由仍使用 H5 域名，REST 与 WSS 均由 API 基址推导。项目尚未正式上线，按用户要求移除了旧版本地址迁移与旧 API 入口兼容；自定义服务器设置仍可使用。
 
 ## 目录结构
 

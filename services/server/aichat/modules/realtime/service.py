@@ -121,12 +121,12 @@ class RealtimeService:
         if interval is None:
             return False
         if interval.left_at is not None:
-            seq = payload.get("seq")
+            seq = int(payload["seq"]) if payload.get("seq") is not None else None
             if seq is None:
                 return False  # 离开后只保留自身主体事件
             if seq > interval.left_seq:
                 return False
-        return payload.get("seq") is None or payload.get("seq", 0) >= interval.joined_seq or event.type not in MESSAGE_EVENTS
+        return payload.get("seq") is None or int(payload["seq"]) >= interval.joined_seq or event.type not in MESSAGE_EVENTS
 
     def _event_frame(self, inbox: InboxEvent, outbox: OutboxEvent) -> dict:
         payload = dict(outbox.payload or {})

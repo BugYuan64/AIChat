@@ -25,10 +25,15 @@ logger = logging.getLogger("aichat.gateway")
 router = APIRouter()
 
 
-async def _error_frame(websocket: WebSocket, code: str, message: str, request_id: str | None = None) -> None:
+async def _error_frame(websocket: WebSocket, code: str, message: str, request_id: str | None = None,
+                       *, execution_id: str | None = None, detail=None) -> None:
     frame = {"type": "error", "code": code, "message": message}
     if request_id:
         frame["request_id"] = request_id
+    if execution_id:
+        frame["execution_id"] = execution_id
+    if isinstance(detail, dict) and "next_chunk_index" in detail:
+        frame["next_chunk_index"] = detail["next_chunk_index"]
     with contextlib.suppress(Exception):
         await websocket.send_json(frame)
 
@@ -57,6 +62,7 @@ async def connector_ws(websocket: WebSocket) -> None:
             return
         connector.status = "online"
         connector.last_seen_at = utcnow()
+        await session.commit()
 
     send_lock = asyncio.Lock()
 
@@ -73,6 +79,14 @@ async def connector_ws(websocket: WebSocket) -> None:
     try:
         while True:
             message = await websocket.receive_json()
+            if not conn.alive:
+                await websocket.close(code=4401)
+                break
+            async with ctx.db.session_factory() as session:
+                active_connector = await session.get(Connector, connector_id)
+                if active_connector is None or active_connector.revoked_at is not None:
+                    await websocket.close(code=4401)
+                    break
             if not isinstance(message, dict):
                 continue
             mtype = message.get("type")
@@ -94,7 +108,13 @@ async def connector_ws(websocket: WebSocket) -> None:
             if mtype == "run.query":
                 async with ctx.db.session_factory() as session:
                     runs = RunsService(ctx, session)
-                    attempt = await runs.get_attempt_by_execution(message.get("execution_id", ""))
+                    try:
+                        attempt = await _authorize_execution(session, runs, connector_id,
+                                                             message.get("execution_id", ""))
+                    except ApiError as exc:
+                        await _error_frame(websocket, exc.code, exc.message, request_id,
+                                           execution_id=message.get("execution_id"), detail=exc.detail)
+                        continue
                     if attempt is None:
                         await _error_frame(websocket, "NOT_FOUND", "执行不存在", request_id)
                     else:
@@ -106,6 +126,7 @@ async def connector_ws(websocket: WebSocket) -> None:
                             "state": run.state if run is not None else "unknown",
                             "attempt_no": attempt.attempt_no,
                             "fencing_token": attempt.fencing_token,
+                            "next_chunk_index": attempt.last_chunk_index + 1,
                             "may_continue": attempt.state == "running",
                             "request_id": request_id,
                         })
@@ -118,7 +139,8 @@ async def connector_ws(websocket: WebSocket) -> None:
                     await _handle_run_frame(ctx, session, runs, connector_id, message)
                     await session.commit()
             except ApiError as exc:
-                await _error_frame(websocket, exc.code, exc.message, request_id)
+                await _error_frame(websocket, exc.code, exc.message, request_id,
+                                   execution_id=message.get("execution_id"), detail=exc.detail)
             except Exception:
                 logger.exception("连接器帧处理异常 type=%s", mtype)
                 await _error_frame(websocket, "TEMPORARILY_UNAVAILABLE", "服务暂时不可用", request_id)
@@ -129,7 +151,8 @@ async def connector_ws(websocket: WebSocket) -> None:
         with contextlib.suppress(Exception):
             async with ctx.db.session_factory() as session:
                 connector_row = await session.get(Connector, connector_id)
-                if connector_row is not None and connector_row.status == "online":
+                if (connector_row is not None and connector_row.status in ("online", "ready", "degraded")
+                        and not ctx.hub.connector_online(connector_id)):
                     connector_row.status = "offline"
                 await session.commit()
             await websocket.close()
@@ -158,6 +181,7 @@ async def _handle_lifecycle(ctx: AppContext, session, connector_id: str, message
 
 
 async def _handle_run_frame(ctx: AppContext, session, runs: RunsService, connector_id: str, message: dict) -> None:
+    await _authorize_execution(session, runs, connector_id, message.get("execution_id", ""))
     mtype = message.get("type")
     common = (
         message.get("run_id", ""),
@@ -196,6 +220,7 @@ async def _handle_run_frame(ctx: AppContext, session, runs: RunsService, connect
             side_effect=message.get("side_effect_status", "none"),
         )
     elif mtype == "run.cancelled":
+        await runs._verify_attempt(*common)
         await runs.confirm_cancelled(
             message.get("execution_id", ""),
             message.get("side_effect_status", "none"),
@@ -204,3 +229,15 @@ async def _handle_run_frame(ctx: AppContext, session, runs: RunsService, connect
         from aichat.core.errors import validation_failed
 
         raise validation_failed(f"未知运行命令: {mtype}")
+
+
+async def _authorize_execution(session, runs: RunsService, connector_id: str, execution_id: str) -> RunAttempt:
+    from aichat.core.errors import forbidden, session_revoked
+
+    connector = await session.get(Connector, connector_id)
+    if connector is None or connector.revoked_at is not None:
+        raise session_revoked("连接器已撤销")
+    attempt = await runs.get_attempt_by_execution(execution_id)
+    if attempt is None or attempt.mode != "connector" or attempt.connector_id != connector_id:
+        raise forbidden("执行不属于该连接器")
+    return attempt

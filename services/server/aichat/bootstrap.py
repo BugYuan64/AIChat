@@ -10,6 +10,7 @@
 import argparse
 import asyncio
 import getpass
+import os
 
 from sqlalchemy import select
 
@@ -87,7 +88,12 @@ async def _run(args) -> None:
     if args.command == "init-db":
         await init_db(ctx)
     elif args.command == "admin":
-        password = args.password or getpass.getpass("管理员密码：")
+        if args.password_env:
+            password = os.environ.get(args.password_env)
+            if not password:
+                raise SystemExit(f"Required password environment variable is not set: {args.password_env}")
+        else:
+            password = args.password or getpass.getpass("管理员密码：")
         await create_admin(ctx, args.handle, password, args.display_name)
     elif args.command == "invite":
         await create_invites(ctx, args.count, args.note)
@@ -104,7 +110,9 @@ def main() -> None:
 
     p_admin = sub.add_parser("admin", help="创建管理员账号")
     p_admin.add_argument("--handle", required=True)
-    p_admin.add_argument("--password", default=None)
+    passwords = p_admin.add_mutually_exclusive_group()
+    passwords.add_argument("--password", default=None)
+    passwords.add_argument("--password-env", default=None, help="从指定环境变量读取密码，不经 shell/argv 展开")
     p_admin.add_argument("--display-name", default="管理员")
 
     p_invite = sub.add_parser("invite", help="发放邀请码")

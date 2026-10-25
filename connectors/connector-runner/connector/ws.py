@@ -69,11 +69,6 @@ def _to_int(value: object) -> int | None:
         return None
 
 
-def _sanitize_message(text: str, limit: int = 300) -> str:
-    """脱敏：压平换行并截断，避免把环境细节原样回传给群。"""
-    return " ".join(str(text).split())[:limit]
-
-
 @dataclass
 class ActiveRun:
     """一个在途执行（含 asyncio 任务与控制标志）。"""
@@ -242,7 +237,7 @@ class ConnectorSession:
         elif ftype == "run.cancel":
             await self._handle_cancel(frame)
         elif ftype == "run.status":
-            self._handle_status(frame)
+            await self._handle_status(frame)
         elif ftype == "error":
             await self._handle_error_frame(frame)
         else:
@@ -321,8 +316,15 @@ class ConnectorSession:
             async for piece in self.adapter.run(run.context, run.system_prompt):
                 if run.stale or run.cancel_requested:
                     break
+                piece_bytes = len(piece.encode("utf-8"))
+                if max_output_bytes is not None and total_bytes + piece_bytes > max_output_bytes:
+                    self._ledger.upsert(run.execution_id, status="failed", chunks=run.chunks)
+                    await self._send({"type": "run.failed", **common, "error_code": "OUTPUT_LIMIT",
+                                      "message": "输出超过允许的字节上限", "side_effect_status": "none"})
+                    return
                 run.chunks.append(piece)
-                total_bytes += len(piece.encode("utf-8"))
+                self._ledger.upsert(run.execution_id, chunks=run.chunks)
+                total_bytes += piece_bytes
                 await self._send(
                     {
                         "type": "run.delta",
@@ -359,7 +361,7 @@ class ConnectorSession:
 
             final_text = "".join(run.chunks)
             self._ledger.upsert(
-                run.execution_id, status="succeeded", chunks=run.chunks, final_text=final_text
+                run.execution_id, status="completion_pending", chunks=run.chunks, final_text=final_text
             )
             completed: dict[str, Any] = {
                 "type": "run.completed",
@@ -375,9 +377,13 @@ class ConnectorSession:
                     final_text.encode("utf-8")
                 ).hexdigest()
             await self._send(completed)
+            await self._send({"type": "run.query", "run_id": run.run_id, "execution_id": run.execution_id})
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except (ConnectionError, OSError, websockets.exceptions.ConnectionClosed):
+            # Keep the durable checkpoint/pending completion for reconnect.
+            log.info("执行 %s 传输中断，等待重连对账", run.execution_id)
+        except Exception:
             log.exception("执行 %s 失败", run.execution_id)
             self._ledger.upsert(run.execution_id, status="failed")
             try:
@@ -386,7 +392,9 @@ class ConnectorSession:
                         "type": "run.failed",
                         **common,
                         "error_code": "ADAPTER_ERROR",
-                        "message": _sanitize_message(str(exc)),
+                        # Upstream response bodies and adapter exceptions may
+                        # contain private data; only local logs receive details.
+                        "message": "适配器执行失败，请检查连接器本机日志",
                         "side_effect_status": "unknown",
                     }
                 )
@@ -414,11 +422,13 @@ class ConnectorSession:
                     "type": "run.cancelled",
                     "run_id": frame.get("run_id") or record.run_id,
                     "execution_id": record.execution_id,
+                    "attempt_no": record.attempt_no,
+                    "fencing_token": record.fencing_token,
                     "side_effect_status": "none",
                 }
             )
 
-    def _handle_status(self, frame: dict) -> None:
+    async def _handle_status(self, frame: dict) -> None:
         """run.status（run.query 的应答或服务端主动通知）。"""
         execution_id = frame.get("execution_id")
         state = frame.get("state")
@@ -431,6 +441,36 @@ class ConnectorSession:
         if state in TERMINAL_STATUSES:
             self._ledger.upsert(str(execution_id), status=str(state))
             log.info("执行 %s 服务端状态：%s（终态）", execution_id, state)
+            return
+        if record.status == "completion_pending" and frame.get("may_continue"):
+            if str(frame.get("fencing_token")) != str(record.fencing_token) or str(frame.get("attempt_no")) != str(record.attempt_no):
+                self._ledger.upsert(record.execution_id, status="failed")
+                return
+            next_index = _to_int(frame.get("next_chunk_index"))
+            if next_index is None:
+                log.warning("run.status 缺少 next_chunk_index，无法安全重放 %s", execution_id)
+                return
+            common = {"run_id": record.run_id, "execution_id": record.execution_id,
+                      "attempt_no": record.attempt_no, "fencing_token": record.fencing_token}
+            for index in range(max(0, next_index), len(record.chunks)):
+                await self._send({"type": "run.delta", **common, "chunk_index": index, "text": record.chunks[index]})
+            text = record.final_text or "".join(record.chunks)
+            completion = {"type": "run.completed", **common, "last_chunk_index": len(record.chunks) - 1, "finish_reason": "stop"}
+            if len(text.encode("utf-8")) <= FINAL_TEXT_MAX_BYTES:
+                completion["final_text"] = text
+            else:
+                completion["content_hash"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            await self._send(completion)
+            await self._send({"type": "run.query", "run_id": record.run_id, "execution_id": record.execution_id})
+            return
+        if frame.get("may_continue") and str(execution_id) not in self._active:
+            # The adapter was interrupted, so explicitly terminate rather than
+            # keeping a dead generation alive through connector heartbeats.
+            await self._send({"type": "run.failed", "run_id": record.run_id,
+                              "execution_id": record.execution_id, "attempt_no": record.attempt_no,
+                              "fencing_token": record.fencing_token, "error_code": "CONNECTION_LOST",
+                              "message": "连接中断导致生成停止，请显式重试", "side_effect_status": "none"})
+            await self._send({"type": "run.query", "run_id": record.run_id, "execution_id": record.execution_id})
             return
         if state:
             self._ledger.upsert(str(execution_id), status=str(state))

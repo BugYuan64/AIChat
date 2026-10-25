@@ -38,12 +38,10 @@ class TokenManager:
         self._refresh_credential = str(credentials.get("refresh_credential") or "")
         if not self._refresh_credential:
             raise ValueError("凭据缺少 refresh_credential，请重新配对")
-        self._access_token = credentials.get("access_token") or None
-        expires_in = _to_float(credentials.get("expires_in"))
-        # 配对刚完成时 access_token 视为新鲜；进程重启后也会在余量外自然刷新
-        self._expires_at = (
-            time.monotonic() + expires_in if (self._access_token and expires_in > 0) else 0.0
-        )
+        # expires_in is relative to issuance, not process startup. Refresh saved
+        # credentials once on startup instead of reviving an expired access token.
+        self._access_token = None
+        self._expires_at = 0.0
 
     async def get_access_token(self) -> str:
         """返回有效访问令牌；即将过期时先刷新。"""

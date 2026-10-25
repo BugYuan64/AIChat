@@ -27,14 +27,14 @@ async def create_request(body: ContactRequestIn, auth: AuthHuman = Depends(curre
                          service: ContactsService = Depends(svc)):
     row = await service.request_contact(auth.account_id, body.target_account_id)
     target = await service.session.get(Account, row.target_id)
-    return contact_request_out(row, target)
+    return contact_request_out(row, target, auth.account_id)
 
 
 @router.get("/contact-requests")
 async def list_requests(auth: AuthHuman = Depends(current_human), service: ContactsService = Depends(svc)):
     items = []
     for row, account in await service.pending_requests_for(auth.account_id):
-        items.append(contact_request_out(row, account))
+        items.append(contact_request_out(row, account, auth.account_id))
     return {"items": items}
 
 
@@ -43,7 +43,7 @@ async def decide(request_id: str, body: DecisionIn, auth: AuthHuman = Depends(cu
                  service: ContactsService = Depends(svc)):
     row = await service.decide_contact_request(request_id, auth.account_id, body.decision == "accept")
     account = await service.session.get(Account, row.requester_id)
-    return contact_request_out(row, account)
+    return contact_request_out(row, account, auth.account_id)
 
 
 @router.get("/contacts")

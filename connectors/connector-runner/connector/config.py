@@ -1,6 +1,6 @@
 """运行配置：服务地址、凭据存储路径、本地账本路径。
 
-取值优先级：CLI 参数 > 环境变量 > 默认值。
+取值优先级：CLI 参数 > 环境变量 > 已配对服务器（地址）/默认路径。
 环境变量：AICHAT_SERVER_URL / AICHAT_CREDENTIALS_PATH / AICHAT_LEDGER_PATH。
 """
 
@@ -33,6 +33,11 @@ class ServerConfig:
         credentials_path: str | Path | None = None,
         ledger_path: str | Path | None = None,
     ) -> "ServerConfig":
+        credentials = Path(
+            credentials_path
+            or os.environ.get("AICHAT_CREDENTIALS_PATH")
+            or DEFAULT_CREDENTIALS_PATH
+        )
         server = (
             server_base_url
             or os.environ.get("AICHAT_SERVER_URL")
@@ -40,17 +45,17 @@ class ServerConfig:
             or ""
         ).strip().rstrip("/")
         if not server:
+            saved = load_credentials(credentials)
+            paired_server = saved.get("server_base_url") if saved else None
+            if isinstance(paired_server, str):
+                server = paired_server.strip().rstrip("/")
+        if not server:
             raise ConfigurationError(
                 "缺少 AIChat 服务地址：传 --server 或设置环境变量 AICHAT_SERVER_URL"
             )
         if not server.startswith(("http://", "https://")):
             raise ConfigurationError("服务地址必须以 http:// 或 https:// 开头")
 
-        credentials = Path(
-            credentials_path
-            or os.environ.get("AICHAT_CREDENTIALS_PATH")
-            or DEFAULT_CREDENTIALS_PATH
-        )
         ledger = Path(
             ledger_path
             or os.environ.get("AICHAT_LEDGER_PATH")

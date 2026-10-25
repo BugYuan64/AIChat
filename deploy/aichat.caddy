@@ -1,0 +1,27 @@
+# H5 may use Cloudflare proxy; API is a separate DNS-only hostname.
+aichat.wsnbb.shop {
+    encode zstd gzip
+    redir /pair "/#/pages/pairing/scan?{query}" 302
+
+    @entry path / /index.html
+    header @entry Cache-Control "no-store"
+    @static_assets path /assets/*
+    header @static_assets Cache-Control "public, max-age=31536000, immutable"
+
+    handle {
+        root * /usr/share/caddy/aichat/current
+        file_server
+    }
+
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+    }
+}
+
+api.aichat.wsnbb.shop {
+    encode zstd gzip
+    header Cache-Control "no-store"
+    header X-Content-Type-Options nosniff
+    reverse_proxy 127.0.0.1:8000
+}

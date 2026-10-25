@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import contextlib
 import logging
 
 from sqlalchemy import select
@@ -46,6 +47,8 @@ async def execute_model_run(ctx: AppContext, run_id: str) -> None:
     """完整执行一个 model_api run；run 已终态则直接返回。"""
     cancel_event = ctx.cancel_flags.register(run_id)
     full_text: list[str] = []
+    lease_task = None
+    lease_lost = False
     try:
         async with ctx.db.session_factory() as session:
             runs = RunsService(ctx, session)
@@ -59,6 +62,23 @@ async def execute_model_run(ctx: AppContext, run_id: str) -> None:
             await session.commit()
             execution_id, attempt_no, fencing = attempt.execution_id, attempt.attempt_no, attempt.fencing_token
 
+        async def renew_ownership() -> None:
+            nonlocal lease_lost
+            interval = min(ctx.settings.run_lease_renew_seconds, ctx.settings.run_lease_seconds / 3)
+            try:
+                while True:
+                    await asyncio.sleep(interval)
+                    async with ctx.db.session_factory() as session:
+                        runs = RunsService(ctx, session)
+                        _, current = await runs._verify_attempt(run_id, execution_id, attempt_no, fencing)
+                        await runs.renew_lease(current)
+                        await session.commit()
+            except Exception:
+                logger.warning("模型任务续租停止 run=%s", run_id, exc_info=True)
+                lease_lost = True
+                cancel_event.set()
+
+        lease_task = asyncio.create_task(renew_ownership())
         spec = await _load_spec(ctx, run_id)
         chunk_index = -1
         buffer: list[str] = []
@@ -88,11 +108,18 @@ async def execute_model_run(ctx: AppContext, run_id: str) -> None:
                 buffer_bytes += len(text.encode("utf-8"))
                 if asyncio.get_event_loop().time() - last_flush >= 1.0 or buffer_bytes >= ctx.settings.delta_checkpoint_pending_bytes:
                     await flush(force_event=True)
-            await flush(force_event=False)  # 终态前把剩余增量全部落库
+            # A cancel forbids further delta writes. Discard the pending buffer
+            # before confirming it instead of turning STALE_FENCE into failure.
+            if not cancel_event.is_set():
+                await flush(force_event=False)
 
             async with ctx.db.session_factory() as session:
                 runs = RunsService(ctx, session)
                 if cancel_event.is_set():
+                    if lease_lost:
+                        # Expiry maintenance owns the unknown outcome; a storage
+                        # or ownership failure is not a user cancellation.
+                        return
                     await runs.confirm_cancelled(execution_id, "none")
                     await session.commit()
                     return
@@ -111,6 +138,7 @@ async def execute_model_run(ctx: AppContext, run_id: str) -> None:
                 runs = RunsService(ctx, session)
                 await runs.fail(run_id, execution_id, attempt_no, fencing,
                                 exc.code, "模型调用失败", "none")
+                await session.commit()
     except Exception:
         logger.exception("model run 执行异常 run=%s", run_id)
         try:
@@ -124,4 +152,8 @@ async def execute_model_run(ctx: AppContext, run_id: str) -> None:
         except Exception:
             logger.exception("model run 失败落库也异常 run=%s", run_id)
     finally:
+        if lease_task is not None:
+            lease_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await lease_task
         ctx.cancel_flags.unregister(run_id)

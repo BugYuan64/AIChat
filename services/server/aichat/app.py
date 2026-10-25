@@ -9,6 +9,7 @@ import contextlib
 import logging
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from aichat.core.config import Settings, get_settings
 from aichat.core.context import AppContext
@@ -52,6 +53,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.ctx = ctx
     register_exception_handlers(app)
     app.add_middleware(EnvelopeMiddleware)
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+            allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
+            max_age=600,
+        )
 
     for router in (identity_router, contacts_router, conversations_router, messages_router,
                    agents_router, pairing_router, realtime_router, runs_router):

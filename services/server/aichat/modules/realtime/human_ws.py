@@ -34,6 +34,7 @@ async def realtime_ws(websocket: WebSocket) -> None:
         try:
             account_id, session_id = await IdentityService(ctx, session).consume_ws_ticket(
                 first["ticket"], "human_events")
+            await session.commit()
         except ApiError:
             await websocket.close(code=4401)
             return
@@ -43,17 +44,22 @@ async def realtime_ws(websocket: WebSocket) -> None:
         stream_row = await session.get(EventStream, account_id)
         last_cursor = stream_row.last_cursor if stream_row is not None else 0
 
-    conn = HumanConnection(account_id=account_id, drain=lambda: None, session_id=session_id)
+    conn = HumanConnection(account_id=account_id, drain=lambda: None, session_id=session_id,
+                           close=lambda: websocket.close(code=4401))
     sent_lock = asyncio.Lock()
 
     async def drain() -> None:
         nonlocal last_cursor
         async with sent_lock:
+            if not conn.alive:
+                return
             async with ctx.db.session_factory() as session:
                 service = RealtimeService(ctx, session)
                 while True:
                     page = await service.events_page(account_id, after=last_cursor, limit=100)
                     for frame in page["items"]:
+                        if not conn.alive:
+                            return
                         await websocket.send_json(frame)
                     last_cursor = max(last_cursor, int(page["next_cursor"]))
                     if not page["has_more"] or not page["items"]:
@@ -78,6 +84,8 @@ async def realtime_ws(websocket: WebSocket) -> None:
         await drain()
         while True:
             message = await websocket.receive_json()
+            if not conn.alive:
+                break
             if message.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
     except (WebSocketDisconnect, RuntimeError):

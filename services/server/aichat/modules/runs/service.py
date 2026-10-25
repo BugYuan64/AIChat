@@ -6,7 +6,7 @@
 
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aichat.core.context import AppContext
@@ -91,7 +91,8 @@ class RunsService:
             .where(
                 Message.conversation_id == conv.id,
                 Message.seq >= ai_membership.joined_seq,
-                Message.seq <= (ai_membership.left_seq if ai_membership.left_seq is not None else 2**62),
+                Message.seq <= min(ai_membership.left_seq, trigger.seq)
+                if ai_membership.left_seq is not None else Message.seq <= trigger.seq,
             )
             .order_by(Message.seq.desc())
             .limit(self.settings.max_context_messages)
@@ -222,6 +223,14 @@ class RunsService:
         run = await self.session.get(Run, run_id)
         if run is None:
             raise not_found("任务不存在")
+        # Keep writes in protocol lock order and refresh after acquiring the lock.
+        await self.messages.get_conversation(run.conversation_id, lock=True)
+        query = select(Run).where(Run.id == run_id).execution_options(populate_existing=True)
+        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        run = await self.session.scalar(query)
+        if run.state not in ACTIVE_RUN_STATES:
+            raise stale_fence("任务已结束")
         attempt = await self.session.scalar(
             select(RunAttempt).where(RunAttempt.run_id == run_id, RunAttempt.attempt_no == attempt_no)
         )
@@ -229,6 +238,8 @@ class RunsService:
             raise stale_fence("execution 不匹配")
         if attempt.fencing_token != fencing_token or run.fencing_counter != fencing_token:
             raise stale_fence()
+        if attempt.state not in ("leased", "running"):
+            raise stale_fence("执行已结束")
         if must_be_running and attempt.state != "running":
             raise stale_fence("执行不在 running 状态")
         return run, attempt
@@ -264,6 +275,7 @@ class RunsService:
             raise stale_fence("会话权限已变化，任务失效")
         if attempt.lease_until <= utcnow():
             raise stale_fence("租约已过期")
+        run.deadline_at = utcnow() + timedelta(seconds=self.settings.run_deadline_seconds)
         message = await self.messages.create_run_response_message(conv, run, run.agent_account_id)
         run.response_message_id = message.id
         run.state = "running"
@@ -396,7 +408,7 @@ class RunsService:
         if attempt is None:
             raise not_found("执行不存在")
         run = await self.session.get(Run, attempt.run_id)
-        if run.state in ("cancelled", "succeeded", "failed", "expired"):
+        if run.state in ("cancelled", "succeeded", "failed", "expired", "recovery_required"):
             return run
         attempt.state = "cancelled"
         attempt.finished_at = utcnow()
@@ -419,6 +431,8 @@ class RunsService:
         is_owner = profile is not None and profile.owner_account_id == actor_account_id
         if run.requester_account_id != actor_account_id and not is_owner and not is_admin:
             raise forbidden("只有触发者或 AI 所有者可以重试")
+        if not await self.messages.has_active_grant(run.agent_account_id, run.requester_account_id):
+            raise forbidden("原触发者的 AI 使用授权已失效")
         trigger = await self.session.get(Message, run.trigger_message_id)
         conv = await self.messages.get_conversation(run.conversation_id, lock=True)
         new_run = Run(
@@ -466,23 +480,28 @@ class RunsService:
             await self.emit_run_updated(run)
             changed += 1
         # 派发租约超时（未开始）→ 回收重派或失败
-        rows = list(await self.session.scalars(
-            select(Run).where(Run.state == "dispatched", Run.deadline_at <= now).limit(50)
-        ))
-        for run in rows:
-            run.state = "expired" if run.attempt_count >= self.settings.run_max_attempts else "queued"
+        rows = list((await self.session.execute(
+            select(Run, RunAttempt).join(RunAttempt, RunAttempt.run_id == Run.id)
+            .where(Run.state == "dispatched", RunAttempt.state == "leased",
+                   or_(RunAttempt.lease_until <= now, Run.deadline_at <= now)).limit(50)
+        )).all())
+        for run, attempt in rows:
+            attempt.state = "expired"
+            attempt.finished_at = now
+            run.fencing_counter += 1
+            run.state = "failed" if run.attempt_count >= self.settings.run_max_attempts else "queued"
             await self.emit_run_updated(run)
             changed += 1
         # 运行租约超时 → recovery_required（结果未知）
-        rows = list(await self.session.scalars(
-            select(Run).where(Run.state.in_(("running", "cancel_requested")),
-                              Run.deadline_at + timedelta(seconds=15) <= now).limit(50)
-        ))
-        for run in rows:
-            attempt = await self.session.scalar(
-                select(RunAttempt).where(RunAttempt.run_id == run.id,
-                                         RunAttempt.state.in_(("leased", "running")))
-            )
+        rows = list((await self.session.execute(
+            select(Run, RunAttempt).outerjoin(
+                RunAttempt, (RunAttempt.run_id == Run.id)
+                & RunAttempt.state.in_(("leased", "running"))
+            ).where(Run.state.in_(("running", "cancel_requested")),
+                    or_(RunAttempt.lease_until <= now,
+                        Run.deadline_at <= now - timedelta(seconds=15))).limit(50)
+        )).all())
+        for run, attempt in rows:
             if attempt is not None:
                 attempt.state = "expired"
                 attempt.finished_at = now
@@ -507,9 +526,15 @@ class RunsService:
             select(MembershipInterval).where(
                 MembershipInterval.conversation_id == run.conversation_id,
                 MembershipInterval.account_id == account_id,
+                MembershipInterval.left_at.is_(None),
             )
         )
-        allowed = membership is not None or await self.messages.has_active_grant(run.agent_account_id, account_id)
+        trigger = await self.session.get(Message, run.trigger_message_id)
+        visible_member = (membership is not None and trigger is not None
+                          and trigger.seq >= membership.joined_seq)
+        profile = await self.session.get(AgentProfile, run.agent_account_id)
+        is_owner = profile is not None and profile.owner_account_id == account_id
+        allowed = visible_member or is_owner or run.requester_account_id == account_id
         if not allowed:
             raise forbidden("无权查看该任务")
         return run

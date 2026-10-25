@@ -102,6 +102,8 @@ class AgentAdapter(Protocol):
 
 ## 测试
 
+2026-10-26 完整单元测试 57 项通过。运行时未指定服务器地址可回退至已配对凭据中的地址；进程启动先刷新保存的访问令牌。输出逐片持久化，完成后保留 `completion_pending`，断线先查询服务端并从其 next_chunk_index 重放；服务端确认终态后才结束恢复。超出字节限制的片段不发送，公开错误不包含上游异常正文。
+
 ```bash
 uv run pytest            # 或：uv run python -m pytest
 ```

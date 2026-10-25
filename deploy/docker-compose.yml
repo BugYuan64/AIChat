@@ -20,19 +20,32 @@ services:
       dockerfile: Dockerfile
     environment:
       AICHAT_ENV: prod
+      AICHAT_PUBLIC_BASE_URL: ${AICHAT_PUBLIC_BASE_URL:-}
+      AICHAT_CORS_ORIGINS: '${AICHAT_CORS_ORIGINS:-[]}'
       AICHAT_DATABASE_URL: postgresql+asyncpg://aichat:${POSTGRES_PASSWORD}@postgres:5432/aichat
       AICHAT_JWT_SECRET: ${AICHAT_JWT_SECRET:?请在 .env 设置强随机 AICHAT_JWT_SECRET}
       AICHAT_CREDENTIAL_MASTER_KEY: ${AICHAT_CREDENTIAL_MASTER_KEY:?请设置 Fernet 主密钥}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:?请设置强随机管理员密码}
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       # 绑定地址可配置：默认 127.0.0.1（经反向代理/TLS 暴露）；直连暴露设 AICHAT_BIND=0.0.0.0
       - "${AICHAT_BIND:-127.0.0.1}:8000:8000"
-    command: >
-      sh -c "python -m alembic upgrade head &&
-             python -m aichat.bootstrap admin --handle admin --password \"${ADMIN_BOOTSTRAP_PASSWORD:-change-me-immediately}\" &&
-             python -m uvicorn aichat.app:app --host 0.0.0.0 --port 8000"
+    init: true
+    command:
+      - sh
+      - -ec
+      - |
+        python -m alembic upgrade head
+        python -m aichat.bootstrap admin --handle admin --password-env ADMIN_BOOTSTRAP_PASSWORD
+        exec python -m uvicorn aichat.app:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
     restart: unless-stopped
 
 volumes:

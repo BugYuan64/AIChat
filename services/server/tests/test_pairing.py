@@ -17,6 +17,17 @@ async def _setup_agent(client, ctx):
 
 
 @pytest.mark.asyncio
+async def test_pairing_qr_uses_configured_public_domain(client, ctx):
+    _, _, agent_id = await _setup_agent(client, ctx)
+    ctx.settings.public_base_url = "https://aichat.wsnbb.shop/"
+    created = await client.post("/v1/pairings", json={
+        "agent_id": agent_id, "connector_name": "Domain test", "adapter_kind": "echo",
+    })
+    assert created.status_code == 201
+    assert created.json()["data"]["qr_payload"].startswith("https://aichat.wsnbb.shop/pair?")
+
+
+@pytest.mark.asyncio
 async def test_full_pairing_flow(client, ctx):
     alice, ha, agent_id = await _setup_agent(client, ctx)
 

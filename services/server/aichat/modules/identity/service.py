@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aichat.core.config import Settings
@@ -17,6 +17,7 @@ from aichat.core.security import (
 )
 from aichat.modules.audit.service import AuditService
 from aichat.modules.identity.models import Account, HumanCredential, Invite, LoginSession, WsTicket
+from aichat.modules.identity.schemas import account_out
 
 
 class IdentityService:
@@ -31,21 +32,22 @@ class IdentityService:
     # ---- 账号 ----
 
     async def register(self, invite_code: str, handle: str, display_name: str, password: str) -> Account:
-        invite = await self.session.get(Invite, invite_code)
-        if invite is None or invite.used_by is not None:
-            raise validation_failed("邀请码无效或已被使用")
-        if invite.expires_at is not None and invite.expires_at <= utcnow():
-            raise validation_failed("邀请码已过期")
         dup = await self.session.scalar(select(Account).where(Account.handle == handle))
         if dup is not None:
             raise validation_failed("账号名已被占用")
         account = Account(id=new_id(), kind="human", handle=handle, display_name=display_name)
+        now = utcnow()
+        claimed = (await self.session.execute(
+            update(Invite).where(Invite.code == invite_code, Invite.used_by.is_(None),
+                                 or_(Invite.expires_at.is_(None), Invite.expires_at > now))
+            .values(used_by=account.id, used_at=now).returning(Invite.code, Invite.note)
+        )).first()
+        if claimed is None:
+            raise validation_failed("邀请码无效、已过期或已被使用")
         self.session.add(account)
         self.session.add(HumanCredential(account_id=account.id, password_hash=hash_password(password)))
-        invite.used_by = account.id
-        invite.used_at = utcnow()
         await self.audit.record("account.register", "account", account.id, actor_account_id=account.id,
-                                summary={"handle": handle, "invite_note": invite.note})
+                                summary={"handle": handle, "invite_note": claimed.note})
         return account
 
     async def get_account(self, account_id: str) -> Account:
@@ -127,18 +129,22 @@ class IdentityService:
 
     async def refresh(self, refresh_token: str) -> dict:
         refresh_hash = sha256_hex(refresh_token)
-        login_session = await self.session.scalar(select(LoginSession).where(LoginSession.refresh_hash == refresh_hash))
+        now = utcnow()
+        login_session = (await self.session.execute(
+            update(LoginSession).where(LoginSession.refresh_hash == refresh_hash,
+                                       LoginSession.revoked_at.is_(None), LoginSession.expires_at > now)
+            .values(revoked_at=now)
+            .returning(LoginSession.id, LoginSession.account_id, LoginSession.device_summary)
+        )).first()
         if login_session is None:
-            raise auth_invalid("刷新凭据无效")
-        if login_session.revoked_at is not None or login_session.expires_at <= utcnow():
             raise auth_invalid("刷新凭据已失效")
         account = await self.session.get(Account, login_session.account_id)
         if account is None or account.status != "active":
             raise auth_invalid("账号不可用")
         # 轮换：旧刷新凭据立即失效
-        login_session.revoked_at = utcnow()
         await self.audit.record("session.rotate", "login_session", login_session.id,
                                 actor_account_id=account.id)
+        await self.ctx.hub.kick_session(login_session.id)
         return await self._issue_session(account, login_session.device_summary)
 
     async def _issue_session(self, account: Account, device_summary: str | None) -> dict:
@@ -163,6 +169,7 @@ class IdentityService:
         await self.audit.record("session.create", "login_session", login_session.id,
                                 actor_account_id=account.id, summary={"device": device_summary})
         return {
+            "account": account_out(account),
             "access_token": access_token,
             "refresh_token": refresh_token,
             "expires_in": self.settings.access_token_seconds,
@@ -173,6 +180,7 @@ class IdentityService:
         if login_session is not None and login_session.account_id == account_id:
             login_session.revoked_at = utcnow()
             await self.audit.record("session.revoke", "login_session", session_id, actor_account_id=account_id)
+            await self.ctx.hub.kick_session(session_id)
 
     # ---- WSS 票据 ----
 
@@ -225,10 +233,22 @@ class IdentityService:
 
     async def consume_ws_ticket(self, ticket: str, audience: str) -> tuple[str, str | None]:
         """一次性消费，返回 (subject_id, session_id)；session_id 仅人类票据非空。"""
-        ws_ticket = await self.session.scalar(
-            select(WsTicket).where(WsTicket.ticket_hash == sha256_hex(ticket), WsTicket.audience == audience)
+        # Conditional update serializes competing handshakes on PostgreSQL and SQLite.
+        now = utcnow()
+        result = await self.session.execute(
+            update(WsTicket).where(WsTicket.ticket_hash == sha256_hex(ticket),
+                                   WsTicket.audience == audience, WsTicket.consumed_at.is_(None),
+                                   WsTicket.expires_at > now)
+            .values(consumed_at=now).returning(WsTicket.subject_id, WsTicket.session_id)
         )
-        if ws_ticket is None or ws_ticket.consumed_at is not None or ws_ticket.expires_at <= utcnow():
+        consumed = result.first()
+        if consumed is None:
             raise auth_invalid("实时票据无效或已使用")
-        ws_ticket.consumed_at = utcnow()
-        return ws_ticket.subject_id, ws_ticket.session_id
+        subject_id, session_id = consumed
+        if audience == "human_events":
+            login = await self.session.get(LoginSession, session_id) if session_id else None
+            account = await self.session.get(Account, subject_id)
+            if (login is None or login.account_id != subject_id or login.revoked_at is not None
+                    or login.expires_at <= now or account is None or account.status != "active"):
+                raise auth_invalid("登录状态无效")
+        return subject_id, session_id

@@ -20,6 +20,7 @@ from aichat.modules.contacts.models import Contact
 from aichat.modules.contacts.service import ContactsService
 from aichat.modules.identity.models import Account
 from aichat.modules.messages.models import Message, ReadCursor
+from aichat.modules.messages.schemas import message_out
 
 
 def _content_fingerprint(text: str, mentions: list[str], reply_to: str | None) -> str:
@@ -114,34 +115,22 @@ class MessagesService:
         return message
 
     async def emit_message_created(self, message: Message, conversation_id: str) -> None:
+        await self.session.flush()
+        sender = await self.session.get(Account, message.sender_account_id) if message.sender_account_id else None
         await emit(
             self.session,
             "message.created",
-            {
-                "message_id": message.id,
-                "seq": message.seq,
-                "sender_account_id": message.sender_account_id,
-                "kind": message.kind,
-                "status": message.status,
-                "revision": message.revision,
-                "mentions": message.mentions or [],
-                "text": message.text if len(message.text or "") <= 8192 else None,
-            },
+            message_out(message, sender),
             conversation_id=conversation_id,
         )
 
     async def emit_message_updated(self, message: Message, conversation_id: str) -> None:
+        await self.session.flush()
+        sender = await self.session.get(Account, message.sender_account_id) if message.sender_account_id else None
         await emit(
             self.session,
             "message.updated",
-            {
-                "message_id": message.id,
-                "seq": message.seq,
-                "status": message.status,
-                "revision": message.revision,
-                "terminal_reason": message.terminal_reason,
-                "text": message.text if len(message.text or "") <= 8192 else None,
-            },
+            message_out(message, sender),
             conversation_id=conversation_id,
         )
 
@@ -312,12 +301,13 @@ class MessagesService:
                 Message.seq >= interval.joined_seq,
                 Message.seq <= upper,
             )
-            .order_by(Message.seq.asc())
+            .order_by(Message.seq.desc())
             .limit(limit + 1)
         )
         rows = list(await self.session.scalars(query))
         has_more = len(rows) > limit
         rows = rows[:limit]
+        rows.reverse()
         return rows, interval.joined_seq, has_more
 
     async def set_read_cursor(self, conversation_id: str, account_id: str, through_seq: int) -> dict:

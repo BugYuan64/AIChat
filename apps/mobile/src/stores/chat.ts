@@ -53,6 +53,7 @@ export const useChatStore = defineStore('chat', {
     /** conversation_id → 按 seq 升序的消息数组 */
     messages: {} as Record<string, Message[]>,
     hasMore: {} as Record<string, boolean>,
+    snapshotLoaded: {} as Record<string, boolean>,
     loadingEarlier: false,
     /** conversation_id → 本地待发（sending/failed） */
     pending: {} as Record<string, PendingMessage[]>,
@@ -176,14 +177,16 @@ export const useChatStore = defineStore('chat', {
 
     /* ---------------- 会话与消息快照 ---------------- */
 
-    async loadConversations() {
+    async loadConversations(isCurrent: () => boolean = () => true) {
       const res = await chatApi.listConversations();
+      if (!isCurrent()) return;
       this.conversations = res.items ?? [];
       this.cacheAccounts(this.conversations.map((c) => c.direct_peer));
     },
 
-    async loadConversationDetail(cid: string) {
+    async loadConversationDetail(cid: string, isCurrent: () => boolean = () => true) {
       const detail = await chatApi.getConversation(cid);
+      if (!isCurrent()) return;
       const map: Record<string, AccountBrief> = {};
       for (const m of detail.members ?? []) map[m.account.account_id] = m.account;
       this.members[cid] = map;
@@ -196,7 +199,7 @@ export const useChatStore = defineStore('chat', {
     /** 进入聊天页：置为活跃会话（抑制未读），确保消息快照与成员资料就绪 */
     async openConversation(cid: string) {
       this.activeConversationId = cid;
-      if (!this.messages[cid]) await this.loadInitialMessages(cid);
+      if (!this.snapshotLoaded[cid]) await this.loadInitialMessages(cid);
       if (!this.members[cid]) {
         try {
           await this.loadConversationDetail(cid);
@@ -210,10 +213,13 @@ export const useChatStore = defineStore('chat', {
       this.activeConversationId = null;
     },
 
-    async loadInitialMessages(cid: string) {
+    async loadInitialMessages(cid: string, isCurrent: () => boolean = () => true) {
       const page = await chatApi.listMessages(cid, { limit: 30 });
-      this.messages[cid] = page.items ?? [];
+      if (!isCurrent()) return;
+      // Merge instead of replacing: a newer event can arrive while HTTP is in flight.
+      for (const message of page.items ?? []) this.upsertMessage(message, false);
       this.hasMore[cid] = !!page.has_more;
+      this.snapshotLoaded[cid] = true;
     },
 
     /** 上拉（滚动到顶）加载更早历史；返回值未使用，滚动锚定由页面处理 */
@@ -254,7 +260,7 @@ export const useChatStore = defineStore('chat', {
     /* ---------------- 消息写入（事件 + HTTP 共用） ---------------- */
 
     /** 新消息插入/覆盖（按 message_id 去重，revision 更大才覆盖），同步维护会话摘要与未读 */
-    upsertMessage(m: Message) {
+    upsertMessage(m: Message, countUnread = true) {
       if (!m?.message_id || !m.conversation_id) return;
       const cid = m.conversation_id;
       const list = (this.messages[cid] ??= []);
@@ -274,7 +280,7 @@ export const useChatStore = defineStore('chat', {
       if (m.client_message_id && m.sender_account_id === readAccount()?.account_id) {
         this.removePending(cid, m.client_message_id);
       }
-      this.applyMessageToConversation(m, inserted);
+      this.applyMessageToConversation(m, inserted && countUnread);
     },
 
     applyMessageToConversation(m: Message, inserted: boolean) {
@@ -466,23 +472,24 @@ export const useChatStore = defineStore('chat', {
     /* ---------------- 重同步 ---------------- */
 
     /** CURSOR_EXPIRED(410) 时的全量 resync：清缓存 → 重拉会话/活跃会话快照；游标由后续事件重新锚定 */
-    async fullResync() {
+    async fullResync(isCurrent: () => boolean = () => true) {
       const active = this.activeConversationId;
       this.resetAll();
       try {
-        await this.loadConversations();
+        await this.loadConversations(isCurrent);
       } catch {
         // 网络失败：等待下次 onShow 重试
       }
+      if (!isCurrent()) return;
       if (active) {
         this.activeConversationId = active;
         try {
-          await this.loadInitialMessages(active);
+          await this.loadInitialMessages(active, isCurrent);
         } catch {
           /* ignore */
         }
         try {
-          await this.loadConversationDetail(active);
+          if (isCurrent()) await this.loadConversationDetail(active, isCurrent);
         } catch {
           /* ignore */
         }
@@ -495,6 +502,7 @@ export const useChatStore = defineStore('chat', {
       this.convDetails = {};
       this.messages = {};
       this.hasMore = {};
+      this.snapshotLoaded = {};
       this.pending = {};
       this.runs = {};
       this.members = {};

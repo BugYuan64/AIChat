@@ -54,6 +54,9 @@ let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let lastFrameAt = 0;
 let catchUpPromise: Promise<void> | null = null;
+let pendingFrames: Array<PersistentFrame & { event_id: string; cursor: string }> = [];
+let welcomeCursor = '';
+let lifecycle = 0;
 
 /* ---------------- 对外接口 ---------------- */
 
@@ -68,6 +71,10 @@ export function startEventsClient(): void {
 /** 停止并断开（退后台 / 登出）；不会触发自动重连 */
 export function stopEventsClient(): void {
   wantRunning = false;
+  lifecycle++;
+  catchUpPromise = null;
+  pendingFrames = [];
+  welcomeCursor = '';
   clearTimers();
   if (socket) {
     const s = socket;
@@ -84,30 +91,44 @@ export function stopEventsClient(): void {
 export function catchUp(): Promise<void> {
   if (!readTokens()?.access_token) return Promise.resolve();
   if (catchUpPromise) return catchUpPromise;
-  catchUpPromise = (async () => {
+  const generation = lifecycle;
+  const operation = (async () => {
     const chat = useChatStore();
     let after = chat.cursor;
     if (!after) return; // 无基线游标：等待 WSS welcome 设定基线
+    let caughtUp = false;
     try {
       for (;;) {
         const page = await fetchEvents(after, CATCHUP_PAGE_LIMIT);
+        if (generation !== lifecycle) return;
         for (const ev of page.items ?? []) {
           chat.applyEventFrame(ev);
         }
         after = page.next_cursor;
         if (!page.has_more) break;
       }
+      caughtUp = true;
     } catch (e) {
+      if (generation !== lifecycle) return;
       if (e instanceof ApiClientError && e.code === ErrorCodes.CURSOR_EXPIRED) {
         // 410：事件游标过期（超出保留期）→ 全量 resync
-        await chat.fullResync();
+        await chat.fullResync(() => generation === lifecycle);
+        if (generation !== lifecycle) return;
+        if (welcomeCursor) chat.setCursor(welcomeCursor);
+        caughtUp = true;
       }
       // 其它错误：静默，等待下次 onShow / WSS 重连再补
     } finally {
-      catchUpPromise = null;
+      if (generation === lifecycle && caughtUp) {
+        const buffered = pendingFrames;
+        pendingFrames = [];
+        buffered.sort((a, b) => cmpDecimalString(a.cursor, b.cursor));
+        for (const event of buffered) chat.applyEventFrame(event);
+      }
     }
-  })();
-  return catchUpPromise;
+  })().finally(() => { if (catchUpPromise === operation) catchUpPromise = null; });
+  catchUpPromise = operation;
+  return operation;
 }
 
 /* ---------------- 内部实现 ---------------- */
@@ -120,6 +141,7 @@ function toWsUrl(base: string, path: string): string {
 async function connect(): Promise<void> {
   if (connecting || socket || !wantRunning) return;
   connecting = true;
+  const generation = lifecycle;
   try {
     let ticket: string;
     try {
@@ -131,6 +153,8 @@ async function connect(): Promise<void> {
       return;
     }
 
+    if (!wantRunning || generation !== lifecycle) return;
+
     const task = uni.connectSocket({
       url: toWsUrl(getServerBase(), '/v1/realtime'),
       success: () => {},
@@ -139,6 +163,7 @@ async function connect(): Promise<void> {
     socket = task;
 
     task.onOpen(() => {
+      if (generation !== lifecycle || socket !== task) return;
       lastFrameAt = Date.now();
       // 10 秒内提交一次性票据；发送失败立即断开
       task.send({
@@ -154,6 +179,7 @@ async function connect(): Promise<void> {
     });
 
     task.onMessage((res) => {
+      if (generation !== lifecycle || socket !== task) return;
       handleFrame(typeof res.data === 'string' ? res.data : String(res.data));
     });
 
@@ -162,7 +188,8 @@ async function connect(): Promise<void> {
     });
 
     task.onClose(() => {
-      if (socket === task) socket = null;
+      if (generation !== lifecycle || socket !== task) return;
+      socket = null;
       clearTimers();
       if (wantRunning) {
         void catchUp(); // 断线立即补拉，避免 UI 停滞
@@ -171,6 +198,7 @@ async function connect(): Promise<void> {
     });
   } finally {
     connecting = false;
+    if (generation !== lifecycle && wantRunning) void connect();
   }
 }
 
@@ -211,7 +239,13 @@ function handleFrame(raw: string): void {
       // 持久事件帧：{"protocol_version":1,"type":"message.created","event_id":"..","cursor":"..",...}
       const pf = frame as unknown as PersistentFrame;
       if (typeof pf.event_id === 'string' && typeof pf.cursor === 'string') {
-        chat.applyEventFrame({ ...pf, event_id: pf.event_id, cursor: pf.cursor });
+        const event = { ...pf, event_id: pf.event_id, cursor: pf.cursor };
+        if (catchUpPromise || pendingFrames.length) {
+          pendingFrames.push(event);
+          if (!catchUpPromise) void catchUp();
+        } else {
+          chat.applyEventFrame(event);
+        }
       }
     }
   }
@@ -225,6 +259,7 @@ function onWelcome(frame: WelcomeFrame): void {
 
   const chat = useChatStore();
   const current = frame.current_cursor;
+  welcomeCursor = current;
   if (!chat.cursor) {
     // 首次运行：以服务端当前游标为基线，历史通过会话/消息 HTTP 快照获得
     chat.setCursor(current);

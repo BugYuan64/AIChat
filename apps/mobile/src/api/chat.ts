@@ -2,6 +2,7 @@
  * 会话 / 群 / 消息 / 事件补拉（PROTOCOL.md §3、§4、§5.1）
  */
 import { request } from './client';
+import { normalizeConversation, normalizeConversationItem } from './normalize';
 import type {
   ConversationDetail,
   ConversationItem,
@@ -84,13 +85,14 @@ export function dissolveConversation(conversation_id: string) {
 }
 
 /** 列表 + 最后消息摘要 + 未读 */
-export function listConversations() {
-  return request<{ items: ConversationItem[] }>({ url: '/v1/conversations' });
+export async function listConversations() {
+  const result = await request<{ items: ConversationItem[] }>({ url: '/v1/conversations' });
+  return { items: result.items.map(normalizeConversationItem) };
 }
 
 /** 详情 + 当前成员/角色 */
-export function getConversation(conversation_id: string) {
-  return request<ConversationDetail>({ url: `/v1/conversations/${encodeURIComponent(conversation_id)}` });
+export async function getConversation(conversation_id: string) {
+  return normalizeConversation(await request<ConversationDetail>({ url: `/v1/conversations/${encodeURIComponent(conversation_id)}` }));
 }
 
 /* ---------------- 消息（§4） ---------------- */

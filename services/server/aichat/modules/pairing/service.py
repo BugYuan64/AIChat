@@ -7,7 +7,7 @@ device_code 只存哈希且仅在创建响应出现一次；兑换在一个事�
 
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aichat.core.context import AppContext
@@ -67,7 +67,7 @@ class PairingService:
         )
         self.session.add(pairing)
         await self.session.flush()
-        base = "https://pair.aichat.local"  # 占位：由反向代理/配置替换为真实入口
+        base = (self.settings.public_base_url or "https://pair.aichat.local").rstrip("/")
         return {
             "pairing_id": pairing.id,
             "short_code": short_code,
@@ -167,7 +167,24 @@ class PairingService:
             raise ApiError(409, "PAIRING_CONSUMED", "配对会话已兑换")
         if pairing.status != "approved":
             raise ApiError(400, _pairing_code(pairing.status), f"配对请求状态为 {pairing.status}")
-        profile = await self.session.get(AgentProfile, pairing.agent_account_id)
+        # Claim with one conditional write. A read followed by an ORM assignment
+        # lets concurrent requests both issue credentials before either commits.
+        redeemed_at = utcnow()
+        claimed = await self.session.scalar(
+            update(PairingSession).where(
+                PairingSession.id == pairing.id,
+                PairingSession.status == "approved",
+                PairingSession.expires_at > redeemed_at,
+            ).values(status="redeemed", redeemed_at=redeemed_at)
+            .returning(PairingSession.id).execution_options(synchronize_session=False)
+        )
+        if claimed is None:
+            raise ApiError(409, "PAIRING_CONSUMED", "配对会话已兑换或状态已变更")
+        # Serialize distinct approved pairings for one AI on PostgreSQL too.
+        profile = await self.session.scalar(
+            select(AgentProfile).where(AgentProfile.account_id == pairing.agent_account_id)
+            .with_for_update()
+        )
         if profile is None:
             raise not_found("AI 档案不存在")
 
@@ -218,7 +235,7 @@ class PairingService:
         connector.binding_generation = generation
 
         pairing.status = "redeemed"
-        pairing.redeemed_at = utcnow()
+        pairing.redeemed_at = redeemed_at
 
         access_token, _ = create_access_token(
             self.settings,
