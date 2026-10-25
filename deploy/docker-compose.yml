@@ -27,7 +27,8 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:8000:8000"  # 生产应置于 TLS 反向代理之后
+      # 绑定地址可配置：默认 127.0.0.1（经反向代理/TLS 暴露）；直连暴露设 AICHAT_BIND=0.0.0.0
+      - "${AICHAT_BIND:-127.0.0.1}:8000:8000"
     command: >
       sh -c "python -m alembic upgrade head &&
              python -m aichat.bootstrap admin --handle admin --password \"${ADMIN_BOOTSTRAP_PASSWORD:-change-me-immediately}\" &&
