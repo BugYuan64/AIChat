@@ -1,5 +1,5 @@
 <template>
-  <view class="page" v-if="agent">
+  <view class="page stagger" v-if="agent">
     <!-- 档案 -->
     <view class="card">
       <view class="profile-row">
@@ -289,7 +289,7 @@ function revokeConnector(c: AgentConnector) {
 .avatar.big {
   width: 110rpx;
   height: 110rpx;
-  border-radius: 22rpx;
+  border-radius: 32rpx;
   font-size: 40rpx;
 }
 .profile-name {
@@ -299,22 +299,22 @@ function revokeConnector(c: AgentConnector) {
 .bio {
   margin-top: 20rpx;
   font-size: 26rpx;
-  color: #5b6472;
+  color: var(--text-secondary);
 }
 .status-row {
   display: flex;
   gap: 16rpx;
 }
 .status-opt {
-  padding: 12rpx 32rpx;
-  border-radius: 12rpx;
-  background: #f2f3f5;
-  color: #5b6472;
+  padding: 14rpx 36rpx;
+  border-radius: 16rpx;
+  background: var(--surface-soft);
+  color: var(--text-secondary);
   font-size: 26rpx;
 }
 .status-opt.on {
-  background: #3b82f6;
-  color: #ffffff;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 .binding-info .tag {
   margin-left: 12rpx;
@@ -323,7 +323,7 @@ function revokeConnector(c: AgentConnector) {
   display: flex;
   align-items: center;
   padding: 16rpx 0;
-  border-bottom: 1rpx solid #f0f1f3;
+  border-bottom: 1rpx solid var(--line);
 }
 .grant-row:last-of-type {
   border-bottom: none;

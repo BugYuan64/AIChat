@@ -31,24 +31,25 @@
 
         <!-- 服务端消息 -->
         <view v-else-if="item.message" class="row" :class="{ mine: isMine(item.message) }" @longpress="onMessageLongPress(item)">
-          <view v-if="!isMine(item.message)" class="avatar" :class="{ ai: memberKindOf(item.message.sender_account_id) === 'ai' }">
+          <view v-if="!isMine(item.message)" class="avatar" :class="{ ai: memberKindOf(item.message.sender_account_id) === 'ai', group: isGroup && memberKindOf(item.message.sender_account_id) !== 'ai' }">
             {{ senderInitial(item.message.sender_account_id) }}
           </view>
           <view class="bubble">
-            <view v-if="!isMine(item.message) && isGroup" class="sender">
-              {{ chatStore.memberName(conversationId, item.message.sender_account_id) || '成员' }}
+            <view v-if="!isMine(item.message) && (isGroup || memberKindOf(item.message.sender_account_id) === 'ai')" class="sender">
+              <text>{{ chatStore.memberName(conversationId, item.message.sender_account_id) || '成员' }}</text>
+              <text v-if="memberKindOf(item.message.sender_account_id) === 'ai'" class="tag tag-ai">AI</text>
             </view>
             <view v-if="item.message.reply_to_message_id" class="quote">{{ quoteText(item.message.reply_to_message_id) }}</view>
             <view v-if="mentionNames(item.message).length" class="mention-line">
               <text v-for="n in mentionNames(item.message)" :key="n" class="mention-chip">@{{ n }}</text>
             </view>
 
-            <view v-if="isGenerating(item.message)" class="text">{{ generatingText(item.message) }}</view>
+            <view v-if="isGenerating(item.message)" class="text breath">{{ generatingText(item.message) }}</view>
             <view v-else class="text">{{ chatStore.renderedTextOf(item.message.message_id) }}</view>
 
             <!-- AI 运行状态卡（终态成功时不展示） -->
             <view v-if="item.message.run_id && runStateText(item.message)" class="run-card" @tap="goRun(item.message.run_id)">
-              <text class="run-state">{{ runStateText(item.message) }}</text>
+              <text class="run-state" :class="{ breath: canCancel(item.message) }">{{ runStateText(item.message) }}</text>
               <view class="run-actions" v-if="canCancel(item.message) || canRetry(item.message)">
                 <view v-if="canCancel(item.message)" class="mini-btn" @tap.stop="doCancelRun(item.message.run_id!)">停止</view>
                 <view v-if="canRetry(item.message)" class="mini-btn" @tap.stop="doRetryRun(item.message.run_id!)">重试</view>
@@ -477,21 +478,21 @@ function copy(text: string) {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #f5f6f7;
+  background: var(--canvas);
   box-sizing: border-box;
 }
 .msg-list {
   flex: 1;
   height: 0;
-  padding: 16rpx 0;
+  padding: 20rpx 0;
   box-sizing: border-box;
 }
 .sys-tip {
   align-self: center;
   margin: 16rpx auto;
-  padding: 8rpx 24rpx;
-  background: #e8eaee;
-  color: #8a9099;
+  padding: 10rpx 28rpx;
+  background: var(--surface-soft);
+  color: var(--text-secondary);
   border-radius: 999rpx;
   font-size: 22rpx;
   max-width: 80%;
@@ -499,13 +500,13 @@ function copy(text: string) {
 }
 .row {
   display: flex;
-  padding: 12rpx 24rpx;
+  padding: 14rpx 28rpx;
   align-items: flex-start;
 }
 .row .avatar {
   width: 68rpx;
   height: 68rpx;
-  border-radius: 14rpx;
+  border-radius: 22rpx;
   font-size: 28rpx;
   margin-right: 16rpx;
 }
@@ -514,33 +515,41 @@ function copy(text: string) {
 }
 .bubble {
   max-width: 76%;
-  background: #ffffff;
-  border-radius: 4rpx 20rpx 20rpx 20rpx;
-  padding: 18rpx 22rpx;
+  background: var(--surface);
+  border: 1rpx solid var(--line);
+  border-radius: 4rpx 28rpx 28rpx 28rpx;
+  padding: 20rpx 26rpx;
 }
 .row.mine .bubble {
-  background: #3b82f6;
-  color: #ffffff;
-  border-radius: 20rpx 4rpx 20rpx 20rpx;
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--text);
+  border-radius: 28rpx 4rpx 28rpx 28rpx;
 }
 .sender {
+  display: flex;
+  align-items: center;
   font-size: 22rpx;
-  color: #8a9099;
-  margin-bottom: 8rpx;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10rpx;
+}
+.sender .tag {
+  margin-left: 10rpx;
 }
 .quote {
   font-size: 22rpx;
-  color: #6b7480;
-  background: #f2f3f5;
-  border-left: 4rpx solid #cbd5e1;
-  border-radius: 8rpx;
-  padding: 8rpx 14rpx;
-  margin-bottom: 10rpx;
+  color: var(--text-secondary);
+  background: var(--surface-soft);
+  border-left: 4rpx solid var(--control-line);
+  border-radius: 10rpx;
+  padding: 10rpx 16rpx;
+  margin-bottom: 12rpx;
 }
 .row.mine .quote {
-  background: rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.9);
-  border-left-color: rgba(255, 255, 255, 0.6);
+  background: rgba(33, 106, 80, 0.1);
+  color: var(--text-secondary);
+  border-left-color: var(--accent);
 }
 .mention-line {
   display: flex;
@@ -550,54 +559,49 @@ function copy(text: string) {
 }
 .mention-chip {
   font-size: 20rpx;
-  color: #3b82f6;
-  background: #eff6ff;
-  border-radius: 6rpx;
-  padding: 2rpx 10rpx;
+  color: var(--ai);
+  background: var(--ai-soft);
+  border-radius: 10rpx;
+  padding: 4rpx 12rpx;
+  font-weight: 600;
 }
 .row.mine .mention-chip {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.2);
+  color: var(--accent);
+  background: rgba(33, 106, 80, 0.12);
 }
 .text {
-  font-size: 28rpx;
-  line-height: 1.5;
+  font-size: 30rpx;
+  line-height: 1.65;
   word-break: break-word;
   white-space: pre-wrap;
 }
 .meta {
-  margin-top: 8rpx;
+  margin-top: 10rpx;
   font-size: 20rpx;
-  color: #b0b6bf;
+  color: var(--text-faint);
   display: flex;
   gap: 8rpx;
   align-items: center;
 }
 .state-sending {
-  color: #b0b6bf;
+  color: var(--text-faint);
 }
 .state-failed {
-  color: #f87171;
+  color: var(--danger);
 }
 .run-card {
-  margin-top: 12rpx;
+  margin-top: 14rpx;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12rpx;
-  background: #f8fafc;
-  border-radius: 10rpx;
-  padding: 10rpx 16rpx;
-}
-.row.mine .run-card {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--surface-soft);
+  border-radius: 16rpx;
+  padding: 12rpx 18rpx;
 }
 .run-state {
   font-size: 22rpx;
-  color: #5b6472;
-}
-.row.mine .run-state {
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--text-secondary);
 }
 .run-actions {
   display: flex;
@@ -605,92 +609,124 @@ function copy(text: string) {
 }
 .mini-btn {
   font-size: 22rpx;
-  color: #3b82f6;
-  border: 1rpx solid #93c5fd;
+  color: var(--accent);
+  border: 1rpx solid var(--accent);
   border-radius: 999rpx;
-  padding: 4rpx 18rpx;
-}
-.row.mine .mini-btn {
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.7);
+  padding: 6rpx 20rpx;
 }
 .typing-bar {
-  padding: 8rpx 32rpx;
+  padding: 10rpx 32rpx;
   font-size: 22rpx;
-  color: #8a9099;
+  color: var(--text-secondary);
+}
+/* 输入中省略号逐级出现(内容动画,旧内核静默降级为无省略号) */
+.typing-bar::after {
+  content: '';
+  margin-left: 6rpx;
+  letter-spacing: 6rpx;
+  animation: dots-step 1.2s steps(1) infinite;
 }
 .closed-bar {
   padding: 16rpx 32rpx calc(16rpx + env(safe-area-inset-bottom));
   text-align: center;
   font-size: 24rpx;
-  color: #b0b6bf;
-  background: #eef0f3;
+  color: var(--text-secondary);
+  background: var(--surface-soft);
 }
 .reply-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14rpx 32rpx;
-  background: #ffffff;
-  border-top: 1rpx solid #f0f1f3;
+  padding: 16rpx 32rpx;
+  background: var(--surface);
+  border-top: 1rpx solid var(--line);
 }
 .reply-text {
   flex: 1;
   font-size: 24rpx;
-  color: #5b6472;
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .reply-cancel {
   padding: 0 12rpx;
-  color: #9aa0a6;
+  color: var(--text-faint);
 }
 .input-bar {
   display: flex;
   align-items: flex-end;
   gap: 16rpx;
   padding: 16rpx 24rpx calc(16rpx + env(safe-area-inset-bottom));
-  background: #ffffff;
-  border-top: 1rpx solid #f0f1f3;
+  background: var(--surface);
+  border-top: 1rpx solid var(--line);
 }
 .icon-btn {
   width: 68rpx;
   height: 68rpx;
-  border-radius: 14rpx;
-  background: #f2f3f5;
-  color: #3b82f6;
-  font-size: 32rpx;
+  border-radius: 18rpx;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 30rpx;
   font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: transform 0.12s ease;
+}
+.icon-btn:active {
+  transform: scale(0.92);
 }
 .input-field {
   flex: 1;
-  background: #f2f3f5;
-  border-radius: 14rpx;
-  padding: 16rpx 20rpx;
-  font-size: 28rpx;
+  background: var(--surface-soft);
+  border-radius: 20rpx;
+  padding: 18rpx 22rpx;
+  font-size: 30rpx;
   min-height: 40rpx;
   max-height: 240rpx;
-  line-height: 1.4;
+  line-height: 1.5;
   box-sizing: border-box;
 }
 .send-btn {
   height: 68rpx;
-  padding: 0 32rpx;
-  border-radius: 14rpx;
-  background: #3b82f6;
-  color: #ffffff;
+  padding: 0 34rpx;
+  border-radius: 20rpx;
+  background: var(--accent);
+  color: var(--on-accent);
   font-size: 28rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+.send-btn:active {
+  transform: scale(0.95);
 }
 .send-btn.disabled {
-  opacity: 0.5;
+  opacity: 0.45;
+}
+/* H5 桌面:消息列与输入区居中为 760px 可读列 */
+@media (min-width: 900px) {
+  .row,
+  .sys-tip,
+  .typing-bar {
+    padding-left: calc(50% - 380px);
+    padding-right: calc(50% - 380px);
+  }
+  .sys-tip,
+  .typing-bar {
+    max-width: none;
+  }
+  .input-bar {
+    padding-left: calc(50% - 380px);
+    padding-right: calc(50% - 380px);
+  }
+  .reply-bar {
+    padding-left: calc(50% - 380px);
+    padding-right: calc(50% - 380px);
+  }
 }
 </style>

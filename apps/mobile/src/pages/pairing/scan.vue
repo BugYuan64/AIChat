@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page stagger">
     <!-- 输入 / 扫码进入 -->
     <view class="card">
       <view class="field">
@@ -272,59 +272,32 @@ function statusText(s: PairingStatus): string {
   font-weight: 600;
   margin-bottom: 16rpx;
 }
-.kv {
-  display: flex;
-  padding: 10rpx 0;
-  font-size: 26rpx;
-}
-.kv .k {
-  width: 160rpx;
-  color: #8a9099;
-  flex-shrink: 0;
-}
-.kv .v {
-  flex: 1;
-  word-break: break-all;
-}
 .confirm-card {
-  background: #fffbeb;
+  background: var(--warning-soft);
+  border-color: transparent;
 }
 .confirm-code {
   font-size: 72rpx;
   font-weight: 700;
   letter-spacing: 16rpx;
   text-align: center;
-  color: #b45309;
+  color: var(--warning);
   margin: 24rpx 0;
+  font-variant-numeric: tabular-nums;
+  animation: pop-in 0.4s ease-out backwards;
 }
 .confirm-check {
   display: flex;
   align-items: flex-start;
   gap: 16rpx;
   font-size: 24rpx;
-  color: #5b6472;
-}
-.checkbox {
-  width: 40rpx;
-  height: 40rpx;
-  border-radius: 10rpx;
-  border: 2rpx solid #cbd5e1;
-  color: #ffffff;
-  font-size: 26rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.checkbox.checked {
-  background: #3b82f6;
-  border-color: #3b82f6;
+  color: var(--text-secondary);
 }
 .agent-opt {
   display: flex;
   align-items: center;
   padding: 16rpx 0;
-  border-bottom: 1rpx solid #f0f1f3;
+  border-bottom: 1rpx solid var(--line);
   .checkbox {
     margin-right: 20rpx;
   }
@@ -335,10 +308,11 @@ function statusText(s: PairingStatus): string {
 .row-line {
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 .foot-tip {
   margin-top: 16rpx;
   font-size: 22rpx;
-  color: #b6bcc4;
+  color: var(--text-faint);
 }
 </style>

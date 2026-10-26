@@ -17,3 +17,6 @@ dist/
 
 # 连接器本机凭据
 .aichat-connector/
+
+# 本地会话产物(截图/预览)
+output/

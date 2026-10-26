@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page stagger">
     <view v-if="!detail && !loadError" class="empty">加载中…</view>
     <view v-else-if="loadError" class="empty">{{ loadError }}</view>
 
@@ -306,6 +306,7 @@ function dissolve() {
 .row-line {
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 .group-title {
   font-size: 34rpx;
@@ -314,7 +315,7 @@ function dissolve() {
 .rename-btn {
   margin-left: auto;
   font-size: 24rpx;
-  color: #3b82f6;
+  color: var(--accent);
   padding: 4rpx 12rpx;
 }
 .rename-box {
@@ -333,25 +334,8 @@ function dissolve() {
 }
 .role-btn {
   font-size: 24rpx;
-  color: #3b82f6;
+  color: var(--accent);
   padding: 8rpx 16rpx;
-}
-.checkbox {
-  width: 40rpx;
-  height: 40rpx;
-  border-radius: 10rpx;
-  border: 2rpx solid #cbd5e1;
-  margin-right: 20rpx;
-  color: #ffffff;
-  font-size: 26rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.checkbox.checked {
-  background: #3b82f6;
-  border-color: #3b82f6;
 }
 .sheet-footer {
   display: flex;

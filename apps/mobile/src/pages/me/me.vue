@@ -1,7 +1,7 @@
 <template>
   <view class="page">
     <!-- 资料卡 -->
-    <view class="card profile">
+    <view class="card profile enter-rise">
       <view class="avatar big">{{ initial }}</view>
       <view class="profile-body">
         <view class="profile-name">{{ account?.display_name || account?.handle || '未登录' }}</view>
@@ -24,18 +24,18 @@
     </view>
 
     <!-- 功能入口 -->
-    <view class="card menu">
+    <view class="card menu stagger">
       <view class="menu-item" @tap="go('/pages/agents/agents')">
         <text>我的 AI</text>
         <text class="arrow">›</text>
       </view>
       <view class="menu-item" @tap="go('/pages/pairing/scan')">
-        <text>扫码 / 配对连接器</text>
+        <text>连接设备</text>
         <text class="arrow">›</text>
       </view>
       <view class="menu-item" @tap="toggleSessions">
-        <text>登录设备</text>
-        <text class="menu-value">{{ sessions.length ? `${sessions.length} 台在线` : '' }}</text>
+        <text>登录会话</text>
+        <text class="menu-value">{{ sessions.length ? `${sessions.length} 个` : '' }}</text>
       </view>
       <view class="menu-item" @tap="showServer = !showServer">
         <text>服务器地址</text>
@@ -48,7 +48,7 @@
     </view>
 
     <!-- 登录设备列表 -->
-    <view v-if="showSessions" class="card">
+    <view v-if="showSessions" class="card stagger">
       <view v-if="sessionsLoading" class="empty">加载中…</view>
       <template v-else>
         <view v-for="s in sessions" :key="s.session_id" class="session-item">
@@ -207,6 +207,7 @@ function logout() {
 .row-line {
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 .profile {
   display: flex;
@@ -215,7 +216,7 @@ function logout() {
 .avatar.big {
   width: 120rpx;
   height: 120rpx;
-  border-radius: 24rpx;
+  border-radius: 36rpx;
   font-size: 44rpx;
 }
 .profile-body {
@@ -230,30 +231,31 @@ function logout() {
 .profile-bio {
   margin-top: 10rpx;
   font-size: 24rpx;
-  color: #8a9099;
+  color: var(--text-secondary);
 }
 .menu-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 28rpx 0;
-  border-bottom: 1rpx solid #f0f1f3;
-  font-size: 28rpx;
+  border-bottom: 1rpx solid var(--line);
+  font-size: 30rpx;
 }
 .menu-item:last-child {
   border-bottom: none;
 }
 .menu-value {
   font-size: 24rpx;
-  color: #8a9099;
+  color: var(--text-secondary);
   max-width: 60%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .arrow {
-  color: #c2c8d0;
+  color: var(--text-faint);
   font-size: 32rpx;
+  margin-left: 12rpx;
 }
 .server-edit {
   display: flex;
@@ -266,7 +268,7 @@ function logout() {
 }
 .field-label {
   font-size: 24rpx;
-  color: #8a9099;
+  color: var(--text-secondary);
   margin: 16rpx 0 8rpx;
 }
 .textarea {
@@ -283,7 +285,7 @@ function logout() {
   align-items: center;
   gap: 16rpx;
   padding: 20rpx 0;
-  border-bottom: 1rpx solid #f0f1f3;
+  border-bottom: 1rpx solid var(--line);
 }
 .session-item:last-of-type {
   border-bottom: none;
@@ -291,11 +293,11 @@ function logout() {
 .foot-tip {
   margin-top: 20rpx;
   font-size: 22rpx;
-  color: #b6bcc4;
+  color: var(--text-faint);
 }
 .foot-note {
   text-align: center;
-  color: #b6bcc4;
+  color: var(--text-faint);
   font-size: 22rpx;
   margin: 40rpx 0;
 }

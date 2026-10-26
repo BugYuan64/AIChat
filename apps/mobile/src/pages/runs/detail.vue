@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page stagger">
     <view v-if="!run && !loadError" class="empty">加载中…</view>
     <view v-else-if="loadError" class="empty">{{ loadError }}</view>
 
@@ -151,55 +151,48 @@ function goConversation() {
 }
 .state-chip {
   font-size: 24rpx;
-  padding: 8rpx 20rpx;
+  padding: 8rpx 22rpx;
   border-radius: 999rpx;
+  font-weight: 600;
+  animation: pop-in 0.35s ease-out backwards;
 }
 .state-chip.run {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .state-chip.ok {
-  background: #dcfce7;
-  color: #16a34a;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .state-chip.bad {
-  background: #fee2e2;
-  color: #dc2626;
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 .state-chip.warn {
-  background: #fef3c7;
-  color: #b45309;
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 .attempt {
   font-size: 24rpx;
-  color: #8a9099;
-}
-.kv {
-  display: flex;
-  padding: 10rpx 0;
-  font-size: 26rpx;
-}
-.kv .k {
-  width: 170rpx;
-  color: #8a9099;
-  flex-shrink: 0;
-}
-.kv .v {
-  flex: 1;
-  word-break: break-all;
+  color: var(--text-secondary);
 }
 .fail-card {
-  background: #fef2f2;
+  background: var(--danger-soft);
+  border-color: transparent;
 }
 .fail-title {
   font-size: 28rpx;
   font-weight: 600;
-  color: #dc2626;
+  color: var(--danger);
   margin-bottom: 8rpx;
+}
+.fail-card .kv .k {
+  color: var(--danger);
+  opacity: 0.75;
 }
 .foot-tip {
   margin-top: 16rpx;
   font-size: 22rpx;
-  color: #b6bcc4;
+  color: var(--text-faint);
 }
 </style>

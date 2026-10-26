@@ -5,21 +5,23 @@
       <view class="empty-sub">点击下方「创建 AI」建立第一个 AI 账号，再绑定模型或连接器</view>
     </view>
 
-    <view v-for="a in agents" :key="a.agent_id" class="list-item" @tap="openDetail(a)">
-      <view class="avatar ai">{{ (a.display_name || 'A').slice(0, 1).toUpperCase() }}</view>
-      <view class="list-body">
-        <view class="row-line">
-          <text class="list-title">{{ a.display_name }}</text>
-          <text class="tag tag-ai">AI</text>
-          <text :class="['tag', a.online ? 'tag-online' : 'tag-offline']">{{ a.online ? '在线' : '离线' }}</text>
+    <view class="stagger">
+      <view v-for="a in agents" :key="a.agent_id" class="list-item" @tap="openDetail(a)">
+        <view class="avatar ai">{{ (a.display_name || 'A').slice(0, 1).toUpperCase() }}</view>
+        <view class="list-body">
+          <view class="row-line">
+            <text class="list-title">{{ a.display_name }}</text>
+            <text class="tag tag-ai">AI</text>
+            <text :class="['tag', a.online ? 'tag-online' : 'tag-offline']">{{ a.online ? '在线' : '离线' }}</text>
+          </view>
+          <view class="list-sub">@{{ a.handle }} · {{ statusText(a.status) }}</view>
+          <view class="list-sub binding">{{ bindingLine(a) }}</view>
         </view>
-        <view class="list-sub">@{{ a.handle }} · {{ statusText(a.status) }}</view>
-        <view class="list-sub binding">{{ bindingLine(a) }}</view>
+        <view class="list-end"><text class="arrow">›</text></view>
       </view>
-      <view class="list-end"><text class="arrow">›</text></view>
     </view>
 
-    <view class="card">
+    <view class="card enter-rise">
       <view v-if="!createVisible" class="btn btn-primary" @tap="createVisible = true">创建 AI</view>
       <view v-else>
         <view class="field">
@@ -123,17 +125,18 @@ async function create() {
 .row-line {
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 .binding {
-  color: #5b6472;
+  color: var(--text-secondary);
 }
 .empty-sub {
   font-size: 22rpx;
-  color: #b6bcc4;
+  color: var(--text-faint);
   margin-top: 12rpx;
 }
 .arrow {
-  color: #c2c8d0;
+  color: var(--text-faint);
   font-size: 36rpx;
 }
 </style>

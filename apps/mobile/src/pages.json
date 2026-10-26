@@ -42,20 +42,35 @@
     }
   ],
   "tabBar": {
-    "color": "#8a9099",
-    "selectedColor": "#3b82f6",
+    "color": "#606d63",
+    "selectedColor": "#216a50",
     "backgroundColor": "#ffffff",
     "borderStyle": "black",
     "list": [
-      { "pagePath": "pages/sessions/sessions", "text": "会话" },
-      { "pagePath": "pages/contacts/contacts", "text": "联系人" },
-      { "pagePath": "pages/me/me", "text": "我的" }
+      {
+        "pagePath": "pages/sessions/sessions",
+        "text": "会话",
+        "iconPath": "static/tab/chat.png",
+        "selectedIconPath": "static/tab/chat-active.png"
+      },
+      {
+        "pagePath": "pages/contacts/contacts",
+        "text": "联系人",
+        "iconPath": "static/tab/contacts.png",
+        "selectedIconPath": "static/tab/contacts-active.png"
+      },
+      {
+        "pagePath": "pages/me/me",
+        "text": "我的",
+        "iconPath": "static/tab/user.png",
+        "selectedIconPath": "static/tab/user-active.png"
+      }
     ]
   },
   "globalStyle": {
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "AIChat",
     "navigationBarBackgroundColor": "#ffffff",
-    "backgroundColor": "#f5f6f7"
+    "backgroundColor": "#f5f6f4"
   }
 }

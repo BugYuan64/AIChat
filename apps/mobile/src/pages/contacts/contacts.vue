@@ -6,7 +6,7 @@
         <input v-model="searchHandle" class="input" placeholder="输入对方账号名（handle）精确查找" confirm-type="search" @confirm="doSearch" />
         <view class="btn btn-primary btn-small" @tap="doSearch">查找</view>
       </view>
-      <view v-if="searchResult" class="search-result">
+      <view v-if="searchResult" class="search-result enter-rise">
         <view class="list-body">
           <view class="row-line">
             <text class="list-title">{{ searchResult.display_name || searchResult.handle }}</text>
@@ -23,7 +23,7 @@
     </view>
 
     <!-- 分栏：联系人 / 待处理申请 -->
-    <view class="segment">
+    <view class="segmented">
       <text :class="['seg-item', segment === 'list' ? 'active' : '']" @tap="switchSegment('list')">
         联系人 {{ contacts.length ? `(${contacts.length})` : '' }}
       </text>
@@ -33,16 +33,25 @@
     </view>
 
     <!-- 建群入口 -->
-    <view v-if="segment === 'list' && !selectMode" class="group-entry" @tap="enterSelectMode">
+    <view v-if="segment === 'list' && !selectMode" class="group-entry enter-rise" @tap="enterSelectMode">
       发起群聊（从联系人中选择成员）
     </view>
 
     <!-- 联系人列表 -->
     <view v-if="segment === 'list'">
-      <view v-if="!contacts.length && !loading" class="empty">还没有联系人，先通过上方搜索添加</view>
+      <view v-if="loading && !contacts.length" class="card">
+        <view v-for="i in 3" :key="'sk' + i" class="skeleton-row">
+          <view class="skeleton skeleton-avatar"></view>
+          <view class="skeleton-lines">
+            <view class="skeleton skeleton-line l1"></view>
+            <view class="skeleton skeleton-line l2"></view>
+          </view>
+        </view>
+      </view>
+      <view v-if="!contacts.length && !loading" class="empty">还没有联系人,先通过上方搜索添加</view>
 
       <!-- 普通模式 -->
-      <view v-if="!selectMode">
+      <view v-if="!selectMode" class="stagger">
         <view v-for="item in contacts" :key="item.account.account_id" class="list-item">
           <view :class="['avatar', item.account.kind === 'ai' ? 'ai' : '']">
             {{ (item.account.display_name || item.account.handle || '?').slice(0, 1).toUpperCase() }}
@@ -63,7 +72,7 @@
       </view>
 
       <!-- 建群多选模式 -->
-      <view v-else>
+      <view v-else class="stagger">
         <view
           v-for="item in connectedContacts"
           :key="item.account.account_id"
@@ -86,7 +95,7 @@
     </view>
 
     <!-- 待处理申请 -->
-    <view v-if="segment === 'requests'">
+    <view v-if="segment === 'requests'" class="stagger">
       <view v-if="!incoming.length && !outgoing.length && !loading" class="empty">暂无待处理申请</view>
       <view class="section-title">收到的申请</view>
       <view v-for="item in incoming" :key="item.account.account_id" class="list-item">
@@ -316,58 +325,23 @@ async function createGroup() {
   align-items: center;
   margin-top: 24rpx;
   padding: 20rpx;
-  background: #f8fafc;
-  border-radius: 14rpx;
-}
-.segment {
-  display: flex;
-  background: #ffffff;
-  margin: 0 24rpx;
-  border-radius: 14rpx;
-  overflow: hidden;
-}
-.seg-item {
-  flex: 1;
-  text-align: center;
-  padding: 20rpx 0;
-  font-size: 28rpx;
-  color: #8a9099;
-}
-.seg-item.active {
-  color: #3b82f6;
-  font-weight: 600;
-  background: #eff6ff;
+  background: var(--surface-soft);
+  border-radius: 20rpx;
 }
 .row-line {
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 .group-entry {
-  margin: 24rpx;
-  padding: 24rpx;
-  border-radius: 16rpx;
-  background: #ffffff;
-  color: #3b82f6;
+  margin: 0 24rpx 24rpx;
+  padding: 26rpx;
+  border-radius: 20rpx;
+  background: var(--surface);
+  color: var(--accent);
   font-size: 26rpx;
   text-align: center;
-  border: 1rpx dashed #c7dbfb;
-}
-.checkbox {
-  width: 40rpx;
-  height: 40rpx;
-  border-radius: 10rpx;
-  border: 2rpx solid #cbd5e1;
-  margin-right: 20rpx;
-  color: #ffffff;
-  font-size: 26rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.checkbox.checked {
-  background: #3b82f6;
-  border-color: #3b82f6;
+  border: 1rpx dashed var(--control-line);
 }
 .group-bar {
   position: fixed;
@@ -378,11 +352,18 @@ async function createGroup() {
   align-items: center;
   gap: 16rpx;
   padding: 20rpx 24rpx calc(20rpx + env(safe-area-inset-bottom));
-  background: #ffffff;
-  box-shadow: 0 -4rpx 16rpx rgba(15, 23, 42, 0.06);
+  background: var(--surface);
+  border-top: 1rpx solid var(--line);
   z-index: 99;
 }
 .group-title-input {
   flex: 1;
+}
+/* H5 桌面:底栏跟随居中内容列 */
+@media (min-width: 768px) {
+  .group-bar {
+    max-width: 720px;
+    margin: 0 auto;
+  }
 }
 </style>
