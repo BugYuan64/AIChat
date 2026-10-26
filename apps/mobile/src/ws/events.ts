@@ -17,7 +17,8 @@
  *      welcome 成功后退避复位；票据获取失败同样走退避；
  *   4. 补拉遇到 410 CURSOR_EXPIRED → chat.fullResync() 全量重同步；
  *   5. 心跳：按 welcome.heartbeat_seconds（默认 20s）发送 {"type":"ping"}；
- *      60 秒无任何帧判离线，强制断开重连；
+ *      60 秒无任何帧判离线，强制断开重连；welcome 之前由建连看门狗兜底
+ *      （12 秒无 welcome 视为挂死，防止 socket 占位导致永久停摆）；
  *   6. run.delta 追加到内存流式缓冲（chunk_index 幂等去重），
  *      终态 message.updated(final) 由 store 清除缓冲。
  *
@@ -34,6 +35,8 @@ const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 60000;
 const OFFLINE_THRESHOLD_MS = 60000;
 const CATCHUP_PAGE_LIMIT = 200;
+/** 建连后超过该时长仍未收到 welcome：视为挂死（无 onOpen/onError/onClose 的静默失败），强制重连 */
+const CONNECT_WATCHDOG_MS = 12000;
 
 /** 与 WSS 持久事件帧同构（HTTP items 元素也满足该形状） */
 interface PersistentFrame {
@@ -52,6 +55,7 @@ let connecting = false;
 let backoffMs = BASE_BACKOFF_MS;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let connectWatchdog: ReturnType<typeof setTimeout> | null = null;
 let lastFrameAt = 0;
 let catchUpPromise: Promise<void> | null = null;
 let pendingFrames: Array<PersistentFrame & { event_id: string; cursor: string }> = [];
@@ -161,6 +165,7 @@ async function connect(): Promise<void> {
       fail: () => {},
     });
     socket = task;
+    armConnectWatchdog(task);
 
     task.onOpen(() => {
       if (generation !== lifecycle || socket !== task) return;
@@ -252,6 +257,7 @@ function handleFrame(raw: string): void {
 }
 
 function onWelcome(frame: WelcomeFrame): void {
+  clearConnectWatchdog();
   backoffMs = BASE_BACKOFF_MS; // 连接成功，复位退避
   const heartbeatSeconds =
     frame.heartbeat_seconds && frame.heartbeat_seconds > 0 ? frame.heartbeat_seconds : 20;
@@ -317,8 +323,27 @@ function scheduleReconnect(): void {
   }, delay);
 }
 
+function armConnectWatchdog(task: UniApp.SocketTask): void {
+  clearConnectWatchdog();
+  connectWatchdog = setTimeout(() => {
+    connectWatchdog = null;
+    if (socket === task && wantRunning) {
+      // 建连后迟迟没有 welcome（升级挂死/票据握手无响应）：强制重连
+      forceReconnect();
+    }
+  }, CONNECT_WATCHDOG_MS);
+}
+
+function clearConnectWatchdog(): void {
+  if (connectWatchdog) {
+    clearTimeout(connectWatchdog);
+    connectWatchdog = null;
+  }
+}
+
 function clearTimers(): void {
   stopHeartbeat();
+  clearConnectWatchdog();
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
