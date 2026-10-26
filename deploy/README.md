@@ -6,7 +6,7 @@
 - 所有平台 API 基址：**https://api.aichat.wsnbb.shop**，Cloudflare 灰云，A 记录为 `35.73.46.1`；人类 WSS 为 `wss://api.aichat.wsnbb.shop/v1/realtime`，连接器 WSS 为 `/v1/connectors/realtime`。
 - SSH 用户：`ubuntu`；源码目录：`/home/ubuntu/aichat`。
 - PostgreSQL 16 与 FastAPI 由该目录 `deploy/docker-compose.yml` 管理；原 `deploy_pgdata` 数据卷保留，API 只绑定 `127.0.0.1:8000`，单 uvicorn worker，容器用户为非 root `aichat`。
-- H5：以 `VITE_AICHAT_SERVER=https://api.aichat.wsnbb.shop` 构建，当前发布目录为 `/usr/share/caddy/aichat/releases/clean-domains-20261026`。按用户要求不保留未上线旧版本的地址迁移、API 入口或旧资源兼容。
+- H5：以 `VITE_AICHAT_SERVER=https://api.aichat.wsnbb.shop` 构建，当前发布目录为 `/usr/share/caddy/aichat/releases/ui-redesign-20261027`（UI 改版 + WSS 建连看门狗修复 + 全局动效；上一版本 `clean-domains-20261026` 保留可回切）。按用户要求不保留未上线旧版本的地址迁移、API 入口或旧资源兼容。
 - HTTPS：复用既有 Docker 容器 `cohost-proxy-caddy-1`（host 网络），站点文件为 `/etc/caddy/Caddyfile.d/aichat.caddy`，对应仓库模板 [aichat.caddy](aichat.caddy)。H5 文件经已存在的 `/usr/share/caddy` 只读挂载提供；`/v1/*`、健康与接口文档反代至 API，支持 WSS。
 - TLS：H5 浏览器侧证书由 Cloudflare 管理，回源继续使用 Caddy 的有效证书；灰云 API 使用 Caddy 自动续期的 Let's Encrypt 证书，本次 API 证书到期为 2027-01-24 00:12（UTC+8）。
 - H5 域名仅提供静态页面及有效的配对跳转，`/v1/*`、`/healthz`、`/docs` 等旧后端路径返回 404。旧 IP `/aichat/*` 反代已从主 Caddyfile 精确移除；后端只经新 API 域名访问。
@@ -23,7 +23,7 @@ HTML 入口使用 `Cache-Control: no-store`，带内容哈希的 `/assets/*` 使
 
 ## 登录与私有配置
 
-管理员账号为 `admin`，原密码经实际登录验证并保持不变。密码位于服务器 `/home/ubuntu/aichat/deploy/.env` 的 `ADMIN_BOOTSTRAP_PASSWORD`；文件权限 600，秘密未写入源码、部署记录或聊天输出。
+管理员账号为 `admin`，密码于 2026-10-26 应所有者要求轮换（bootstrap 不覆盖已有账号，变更经容器内服务端脚本直调服务层完成，并同步吊销 admin 既有登录会话）；同日另建普通账号 `bjy`（服务层直调创建，密码弱于注册接口 8 位下限，仅联调使用）。当前密码以服务器 `/home/ubuntu/aichat/deploy/.env` 的 `ADMIN_BOOTSTRAP_PASSWORD` 为准（已同步轮换）；文件权限 600，秘密未写入源码、部署记录或聊天输出。分域切换后，浏览器若遗留旧版本写入的 localStorage 服务器地址，登录会一直超时：在登录页「服务器设置」改回 `https://api.aichat.wsnbb.shop` 或清除该站点数据即可。
 
 该文件另含数据库密码、JWT 签名密钥、Fernet 主密钥，以及非秘密设置：
 
