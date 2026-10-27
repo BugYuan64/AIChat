@@ -41,6 +41,71 @@ function runtime(respond, options = {}) {
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const message = (id, seq) => ({ message_id: id, conversation_id: 'conv', seq, sender_account_id: 'other', kind: 'text', text: id, mentions: [], status: 'final', revision: '1', created_at: '2026-10-25T00:00:00Z', updated_at: '2026-10-25T00:00:00Z' });
 
+test('chat drafts remain isolated per conversation and are cleared on logout reset', () => {
+  const store = runtime(() => ({})).load('stores/chat.ts').useChatStore();
+  store.updateComposerDraft('first', { text: '未发送的想法', mentions: ['ai'], reply: message('quoted', '1') });
+  store.updateComposerDraft('second', { text: '另一段对话' });
+  store.activeConversationId = 'second';
+  assert.equal(store.composerDrafts.first.text, '未发送的想法');
+  assert.equal(JSON.stringify(store.composerDrafts.first.mentions), JSON.stringify([{ account_id: 'ai', name: '' }]));
+  assert.equal(store.composerDrafts.first.reply.message_id, 'quoted');
+  store.resetAll();
+  assert.deepEqual(Object.keys(store.composerDrafts), []);
+});
+
+test('drafts survive memory reset via storage and carry mention/reply snapshots', () => {
+  const rt = runtime(() => ({}));
+  const store = rt.load('stores/chat.ts').useChatStore();
+  store.members.conv = { other: { account_id: 'other', handle: 'chen', display_name: '陈晨' } };
+  store.updateComposerDraft('conv', { text: '在吗', mentions: [{ account_id: 'other', name: '陈晨' }], reply: message('quoted', '1') });
+
+  // 冷启动：新 store 实例从存储读回草稿，引用与提及都带着名字
+  setActivePinia(createPinia());
+  const revived = rt.load('stores/chat.ts').useChatStore();
+  assert.equal(revived.composerDrafts.conv.text, '在吗');
+  assert.equal(JSON.stringify(revived.composerDrafts.conv.mentions), JSON.stringify([{ account_id: 'other', name: '陈晨' }]));
+  assert.equal(revived.composerDrafts.conv.reply.sender_name, '陈晨');
+  assert.equal(revived.composerDrafts.conv.reply.text, 'quoted');
+
+  // resync 只清内存，草稿从存储回来
+  revived.resetAll();
+  revived.hydrateDrafts();
+  assert.equal(revived.composerDrafts.conv.text, '在吗');
+
+  // 清空正文/提及/引用即删除该会话草稿
+  revived.updateComposerDraft('conv', { text: '', mentions: [], reply: null });
+  assert.equal(revived.composerDrafts.conv, undefined);
+  assert.deepEqual(Object.keys(JSON.parse(rt.uni.getStorageSync('aichat.drafts') || '{}')), []);
+});
+
+test('401 keeps drafts while explicit logout drops them', () => {
+  const rt = runtime(() => ({}));
+  const store = rt.load('stores/chat.ts').useChatStore();
+  store.updateComposerDraft('conv', { text: '别丢我' });
+
+  const auth = rt.load('stores/auth.ts').useAuthStore();
+  // 401 强制登出路径：resetLocal 不清草稿
+  auth.resetLocal();
+  assert.equal(JSON.parse(rt.uni.getStorageSync('aichat.drafts')).conv.text, '别丢我');
+
+  // 主动登出：草稿一并清除
+  return auth.logout().then(() => {
+    assert.equal(rt.uni.getStorageSync('aichat.drafts'), undefined);
+  });
+});
+
+test('corrupt draft entries are dropped individually instead of breaking the whole map', () => {
+  const rt = runtime(() => ({}), { storage: { 'aichat.drafts': JSON.stringify({ good: { text: 'ok', mentions: [{ account_id: 'ai', name: 'AI' }], reply: null, updated_at: 1 }, bad: 'nope', empty: { text: '   ' } }) } });
+  const store = rt.load('stores/chat.ts').useChatStore();
+  assert.deepEqual(Object.keys(store.composerDrafts), ['good']);
+
+  // 整个 JSON 坏掉时退化为空表，不抛错
+  rt.uni.setStorageSync('aichat.drafts', '{not json');
+  store.resetAll();
+  store.hydrateDrafts();
+  assert.equal(Object.keys(store.composerDrafts).length, 0);
+});
+
 test('server agent account_id remains usable in navigation and pairing', async () => {
   const rt = runtime(() => ({ items: [{ account_id: 'ai', handle: 'helper', display_name: 'Helper', owner_account_id: 'me', status: 'active', connector: { status: 'ready' } }] }));
   const result = await rt.load('api/agents.ts').listAgents();

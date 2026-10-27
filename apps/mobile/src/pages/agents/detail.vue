@@ -1,128 +1,73 @@
 <template>
-  <view class="page stagger" v-if="agent">
-    <!-- 档案 -->
-    <view class="card">
-      <view class="profile-row">
-        <view class="avatar ai big">{{ (agent.display_name || 'A').slice(0, 1).toUpperCase() }}</view>
-        <view class="list-body">
-          <view class="profile-name">{{ agent.display_name }}</view>
-          <view class="list-sub">@{{ agent.handle }}</view>
-          <view class="list-sub">
-            <text :class="['tag', agent.online ? 'tag-online' : 'tag-offline']">{{ agent.online ? '在线' : '离线' }}</text>
-            <text class="tag">{{ agent.status === 'active' ? '正常' : agent.status }}</text>
+  <PageLayout :title="agent?.display_name || 'AI 详情'" eyebrow="AI PROFILE" subtitle="管理这位搭档的身份、运行方式与访问权限。" active="agents" back :back-fallback="backFallback">
+    <InlineNotice v-if="loadError" tone="danger">{{ loadError }}<UiButton variant="ghost" size="small" @click="load">重新加载</UiButton></InlineNotice>
+    <view v-else-if="!agent" class="panel-hint">正在加载 AI 档案…</view>
+    <view v-if="agent" class="detail-grid">
+      <view class="panel-stack">
+        <SectionPanel tone="mint">
+          <view class="hero-row"><AccountAvatar :name="agent.display_name" kind="agent" size="large" /><view class="data-copy"><text class="hero-name">{{ agent.display_name }}</text><text class="data-description">@{{ agent.handle }}</text></view><UiButton variant="secondary" size="small" icon="square-pen" @click="openEdit">编辑</UiButton></view>
+          <view class="button-row"><StatusBadge :tone="agent.online ? 'success' : 'neutral'" :pulse="agent.online">{{ agent.online ? '在线' : '离线' }}</StatusBadge><StatusBadge :tone="agent.status === 'active' ? 'primary' : 'warning'">{{ agent.status === 'active' ? '正常' : '已停用' }}</StatusBadge></view>
+          <text v-if="agent.bio" class="agent-bio">{{ agent.bio }}</text>
+        </SectionPanel>
+        <SectionPanel title="运行方式" description="模型 API 或连接器，同一时间仅启用一种。" icon="bot">
+          <view v-if="agent.binding?.enabled" class="binding-summary">
+            <view class="data-row"><view class="binding-symbol"><UiIcon :name="agent.binding.mode === 'model_api' ? 'bot' : 'link-2'" tone="primary" :size="24" /></view><view class="data-copy"><text class="data-title">{{ agent.binding.mode === 'model_api' ? '模型 API' : '外部连接器' }}</text><text class="data-description">{{ agent.binding.mode === 'model_api' ? [agent.binding.provider_code, agent.binding.model_name].filter(Boolean).join(' / ') : '通过已配对设备运行' }}</text></view><StatusBadge tone="primary">已启用</StatusBadge></view>
+            <text class="panel-hint">绑定代际 {{ agent.binding.generation }}。凭据由服务器加密保存。</text>
+            <view class="button-row"><UiButton variant="danger" size="small" @click="revokeBinding">撤销当前绑定</UiButton></view>
           </view>
-        </view>
+          <view v-else><EmptyState icon="link-2" title="选择一种方式，让搭档开始工作" description="使用模型 API 直接接入，或在外部连接器发起配对。" /><view class="binding-choices"><UiButton icon="bot" @click="bindingVisible = true">绑定模型 API</UiButton><UiButton variant="secondary" icon="scan-line" @click="openPairing">配对连接器</UiButton></view></view>
+        </SectionPanel>
+        <SectionPanel title="使用授权" description="默认只有你可以使用这个 AI，按需授权给其他人。" icon="shield-check">
+          <view v-for="g in grants" :key="g.human_account_id" class="data-row"><AccountAvatar :name="g.account?.display_name || g.account?.handle || '?'" size="small" /><view class="data-copy"><text class="data-title">{{ g.account?.display_name || g.account?.handle || g.human_account_id }}</text><text class="data-description">@{{ g.account?.handle || g.human_account_id }}</text></view><UiButton variant="danger" size="small" @click="revokeGrant(g)">撤销</UiButton></view>
+          <text v-if="!grants.length" class="panel-hint">目前没有其他被授权用户。</text>
+          <view class="grant-form"><input v-model="grantHandle" class="input" aria-label="要授权的用户账号名" placeholder="输入人类用户的账号名" /><UiButton variant="secondary" size="small" @click="addGrant">授权</UiButton></view>
+        </SectionPanel>
       </view>
-      <view v-if="agent.bio" class="bio">{{ agent.bio }}</view>
-      <view class="divider" />
-      <view v-if="!editVisible" class="btn btn-ghost" @tap="openEdit">编辑档案</view>
-      <view v-else>
-        <view class="field">
-          <view class="field-label">名称</view>
-          <input v-model="editForm.display_name" class="input" :maxlength="64" />
-        </view>
-        <view class="field">
-          <view class="field-label">状态</view>
-          <view class="status-row">
-            <text :class="['status-opt', editForm.status === 'active' ? 'on' : '']" @tap="editForm.status = 'active'">启用</text>
-            <text :class="['status-opt', editForm.status === 'disabled' ? 'on' : '']" @tap="editForm.status = 'disabled'">停用</text>
-          </view>
-        </view>
-        <view class="btn btn-primary btn-small" @tap="saveEdit">保存</view>
-        <view class="btn btn-small" @tap="editVisible = false">取消</view>
+      <view class="panel-stack">
+        <SectionPanel title="已连接设备" description="查看与撤销已绑定的连接器。" icon="link-2">
+          <EmptyState v-if="!connectors.length" icon="link-2" title="还没有连接器" description="在连接器上发起配对后，使用当前客户端扫码批准。" />
+          <view v-for="c in connectors" :key="c.connector_id" class="connector-row"><view class="data-row"><view class="data-copy"><text class="data-title">{{ c.name }}</text><text class="data-description">{{ c.platform || '未知平台' }} · {{ formatTime(c.created_at) }}</text></view><StatusBadge :tone="c.online ? 'success' : 'neutral'">{{ c.online ? '在线' : '离线' }}</StatusBadge></view><UiButton variant="danger" size="small" @click="revokeConnector(c)">撤销设备</UiButton></view>
+        </SectionPanel>
+        <SectionPanel title="独立身份，清晰边界" tone="violet" icon="info"><text class="panel-hint">AI 使用独立账号参与对话。授权决定谁能触发它，绑定决定它在哪里运行。撤销绑定会取消在途运行。</text></SectionPanel>
       </view>
     </view>
-
-    <!-- 运行绑定 -->
-    <view class="section-title">运行绑定（模型 API / 连接器二选一，仅一个启用）</view>
-    <view class="card">
-      <view v-if="agent.binding && agent.binding.enabled" class="binding-info">
-        <view class="list-title">
-          {{ agent.binding.mode === 'model_api' ? '模型 API' : '连接器' }}
-          <text class="tag">代际 {{ agent.binding.generation }}</text>
-        </view>
-        <view v-if="agent.binding.mode === 'model_api'" class="list-sub">
-          {{ agent.binding.provider_code }} / {{ agent.binding.model_name }}（凭据已加密保存，不在客户端展示）
-        </view>
-        <view class="btn btn-danger btn-small" style="margin-top: 20rpx" @tap="revokeBinding">撤销绑定</view>
-      </view>
-      <view v-else>
-        <view class="list-sub" style="margin-bottom: 20rpx">
-          {{ agent.binding && !agent.binding.enabled ? '当前绑定未启用，可重新绑定覆盖。' : '尚未绑定。绑定模型 API 需录入密钥，连接测试通过后启用；外部 Agent 请在连接器上发起配对后到「我的-扫码配对」。' }}
-        </view>
-        <view class="field">
-          <view class="field-label">供应商务（provider_code，管理员预配置）</view>
-          <input v-model="bindForm.provider_code" class="input" placeholder="例如 openai" />
-        </view>
-        <view class="field">
-          <view class="field-label">模型名（model_name）</view>
-          <input v-model="bindForm.model_name" class="input" placeholder="例如 gpt-4o-mini" />
-        </view>
-        <view class="field">
-          <view class="field-label">密钥（credential，仅提交一次，服务端加密保存）</view>
-          <input v-model="bindForm.credential" class="input" password placeholder="不会在本地存储" />
-        </view>
-        <view class="field">
-          <view class="field-label">系统提示词（可选）</view>
-          <textarea v-model="bindForm.system_prompt" class="textarea" :maxlength="2000" />
-        </view>
-        <view class="btn btn-primary" :class="{ 'btn-disabled': binding }" @tap="bindModel">
-          {{ binding ? '连接测试中…' : '测试并启用绑定' }}
-        </view>
-      </view>
-    </view>
-
-    <!-- 使用授权 -->
-    <view class="section-title">使用授权（默认仅所有者本人可用）</view>
-    <view class="card">
-      <view v-for="g in grants" :key="g.human_account_id" class="grant-row">
-        <view class="list-body">
-          <view class="list-title">{{ g.account?.display_name || g.account?.handle || g.human_account_id }}</view>
-          <view class="list-sub">@{{ g.account?.handle || g.human_account_id }}</view>
-        </view>
-        <view class="btn btn-danger btn-small" @tap="revokeGrant(g)">撤销</view>
-      </view>
-      <view v-if="!grants.length" class="list-sub" style="margin-bottom: 16rpx">暂无其他被授权用户</view>
-      <view class="grant-add">
-        <input v-model="grantHandle" class="input" placeholder="输入要授权的用户账号名（handle）" />
-        <view class="btn btn-ghost btn-small" @tap="addGrant">授权</view>
-      </view>
-    </view>
-
-    <!-- 连接器 -->
-    <view class="section-title">已绑定连接器</view>
-    <view class="card">
-      <view v-if="!connectors.length" class="list-sub">暂无连接器（可在连接器上发起配对，扫码批准）</view>
-      <view v-for="c in connectors" :key="c.connector_id" class="grant-row">
-        <view class="list-body">
-          <view class="list-title">
-            {{ c.name }}
-            <text :class="['tag', c.online ? 'tag-online' : 'tag-offline']">{{ c.online ? '在线' : '离线' }}</text>
-          </view>
-          <view class="list-sub">{{ c.platform || '未知平台' }} · 接入于 {{ formatTime(c.created_at) }}</view>
-        </view>
-        <view class="btn btn-danger btn-small" @tap="revokeConnector(c)">撤销</view>
-      </view>
-    </view>
-  </view>
-
-  <view v-else class="empty">{{ loadError || '加载中…' }}</view>
+    <template #overlay>
+      <BottomSheet :open="editVisible" title="编辑 AI 档案" @close="editVisible = false"><view class="sheet-form"><view class="field"><label class="field-label">名称</label><input v-model="editForm.display_name" class="input" aria-label="AI 名称" :maxlength="64" /></view><label class="field-label">账号状态</label><view class="button-row"><UiButton :variant="editForm.status === 'active' ? 'primary' : 'secondary'" @click="editForm.status = 'active'">启用</UiButton><UiButton :variant="editForm.status === 'disabled' ? 'danger' : 'secondary'" @click="editForm.status = 'disabled'">停用</UiButton></view></view><template #footer><UiButton class="wide-button" @click="saveEdit">保存档案</UiButton></template></BottomSheet>
+      <BottomSheet :open="bindingVisible" title="绑定模型 API" @close="closeBinding"><view class="sheet-form"><InlineNotice v-if="actionError" tone="danger">{{ actionError }}</InlineNotice><view class="field"><label class="field-label">供应商代码</label><input v-model="bindForm.provider_code" class="input" aria-label="供应商代码" placeholder="管理员预配置的 provider_code" /></view><view class="field"><label class="field-label">模型名称</label><input v-model="bindForm.model_name" class="input" aria-label="模型名称" placeholder="输入供应商支持的模型名" /></view><view class="field"><label class="field-label">API 密钥</label><input v-model="bindForm.credential" class="input" password aria-label="API 密钥" placeholder="仅提交至服务器，不在本地存储" /></view><view class="field"><label class="field-label">系统提示词（可选）</label><textarea v-model="bindForm.system_prompt" class="textarea" aria-label="系统提示词" :maxlength="2000" /></view><text class="panel-hint">连接测试通过后才会启用。密钥由服务器加密保存。</text></view><template #footer><UiButton class="wide-button" :loading="binding" @click="bindModel">{{ binding ? '正在测试连接…' : '测试并启用' }}</UiButton></template></BottomSheet>
+    </template>
+  </PageLayout>
 </template>
-
 <script setup lang="ts">
+import PageLayout from '../../components/layout/PageLayout.vue';
+import SectionPanel from '../../components/ui/SectionPanel.vue';
+import UiButton from '../../components/ui/UiButton.vue';
+import NativeButton from '../../components/ui/NativeButton.vue';
+import UiIcon from '../../components/ui/UiIcon.vue';
+import AccountAvatar from '../../components/ui/AccountAvatar.vue';
+import StatusBadge from '../../components/ui/StatusBadge.vue';
+import InlineNotice from '../../components/ui/InlineNotice.vue';
+import EmptyState from '../../components/ui/EmptyState.vue';
+import BottomSheet from '../../components/ui/BottomSheet.vue';
+
 import { computed, ref } from 'vue';
 import { onLoad, onShow } from '@dcloudio/uni-app';
 import * as agentsApi from '../../api/agents';
 import { revokeConnector as revokeConnectorApi } from '../../api/pairing';
 import { describeError } from '../../api/client';
 import { formatTime } from '../../utils/misc';
+import type { BackFallback } from '../../utils/nav';
 import type { Agent, AgentConnector, AgentGrant } from '../../api/types';
+
+/** 深链直达时页面栈只有一层，返回键要回到「我的 AI」列表而不是会话页 */
+const backFallback: BackFallback = { url: '/pages/agents/agents' };
 
 const agentId = ref('');
 const agent = ref<Agent | null>(null);
 const loadError = ref('');
 
 const editVisible = ref(false);
+const bindingVisible = ref(false);
+const actionError = ref('');
 const editForm = ref({ display_name: '', status: 'active' });
 
 const binding = ref(false);
@@ -183,7 +128,9 @@ async function bindModel() {
     uni.showToast({ title: '请填写供应商务、模型名与密钥', icon: 'none' });
     return;
   }
+  if (binding.value) return;
   binding.value = true;
+  actionError.value = '';
   try {
     agent.value = await agentsApi.bindModel(agentId.value, {
       provider_code: f.provider_code.trim(),
@@ -192,9 +139,10 @@ async function bindModel() {
       system_prompt: f.system_prompt.trim() || undefined,
     });
     bindForm.value = { provider_code: '', model_name: '', credential: '', system_prompt: '' };
+    bindingVisible.value = false;
     uni.showToast({ title: '连接测试通过，已启用', icon: 'success' });
   } catch (e) {
-    uni.showToast({ title: describeError(e), icon: 'none' });
+    actionError.value = describeError(e);
   } finally {
     binding.value = false;
   }
@@ -279,62 +227,7 @@ function revokeConnector(c: AgentConnector) {
     },
   });
 }
+function openPairing() { uni.navigateTo({ url: '/pages/pairing/scan' }); }
+function closeBinding() { if (binding.value) return; bindingVisible.value = false; bindForm.value.credential = ''; }
 </script>
-
-<style lang="scss" scoped>
-.profile-row {
-  display: flex;
-  align-items: center;
-}
-.avatar.big {
-  width: 110rpx;
-  height: 110rpx;
-  border-radius: 32rpx;
-  font-size: 40rpx;
-}
-.profile-name {
-  font-size: 34rpx;
-  font-weight: 600;
-}
-.bio {
-  margin-top: 20rpx;
-  font-size: 26rpx;
-  color: var(--text-secondary);
-}
-.status-row {
-  display: flex;
-  gap: 16rpx;
-}
-.status-opt {
-  padding: 14rpx 36rpx;
-  border-radius: 16rpx;
-  background: var(--surface-soft);
-  color: var(--text-secondary);
-  font-size: 26rpx;
-}
-.status-opt.on {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-.binding-info .tag {
-  margin-left: 12rpx;
-}
-.grant-row {
-  display: flex;
-  align-items: center;
-  padding: 16rpx 0;
-  border-bottom: 1rpx solid var(--line);
-}
-.grant-row:last-of-type {
-  border-bottom: none;
-}
-.grant-add {
-  display: flex;
-  gap: 16rpx;
-  align-items: center;
-  margin-top: 16rpx;
-  .input {
-    flex: 1;
-  }
-}
-</style>
+<style scoped>.agent-bio { display: block; margin-top: 20px; color: var(--text-secondary); font-size: 14px; line-height: 1.7; }.binding-symbol { width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 16px; background: var(--accent-soft); }.binding-summary > .panel-hint { margin-top: 15px; }.binding-choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }.grant-form { display: flex; align-items: center; gap: 10px; margin-top: 18px; }.grant-form > .input { flex: 1; min-width: 0; }.connector-row { padding-bottom: 18px; border-bottom: 1px solid var(--line); }.connector-row:last-child { border-bottom: 0; }.connector-row .data-row { border-bottom: 0; }.sheet-form { padding: 0 22px 22px; }.sheet-form > .inline-notice { margin-bottom: 16px; }</style>

@@ -11,7 +11,15 @@
 import { defineStore } from 'pinia';
 import * as chatApi from '../api/chat';
 import { STORAGE_KEYS, readAccount } from '../api/client';
-import { cmpDecimalString } from '../utils/misc';
+import { cmpDecimalString, truncate } from '../utils/misc';
+import {
+  readDraft,
+  readDrafts,
+  writeDraft,
+  type ConversationDraft,
+  type DraftMention,
+  type DraftReplySnapshot,
+} from '../utils/drafts';
 import type {
   AccountBrief,
   ConversationItem,
@@ -37,6 +45,54 @@ export interface DisplayItem {
   pending?: PendingMessage;
 }
 
+/**
+ * 组件对草稿的增量更新：
+ * - mentions 可传 account_id 列表（顺带用缓存补名字）或已有快照；
+ * - reply 可传整条消息（长按「引用回复」）或快照。
+ * 统一在这里归一成可序列化快照，避免组件各自处理。
+ */
+export interface ComposerDraftPatch {
+  text?: string;
+  mentions?: Array<string | DraftMention>;
+  reply?: Message | DraftReplySnapshot | null;
+}
+
+const EMPTY_DRAFT: ConversationDraft = { text: '', mentions: [], reply: null, updated_at: 0 };
+
+/** 引用落成快照：消息对象在冷启动后不存在，必须连发送者名和摘要一起存 */
+function toReplySnapshot(
+  input: Message | DraftReplySnapshot | null,
+  nameOf: (accountId: string) => string,
+): DraftReplySnapshot | null {
+  if (!input) return null;
+  if ('sender_account_id' in input) {
+    return {
+      message_id: input.message_id,
+      sender_name: nameOf(input.sender_account_id),
+      text: truncate(input.text ?? '', 60),
+    };
+  }
+  const s = input as DraftReplySnapshot;
+  return { message_id: s.message_id, sender_name: s.sender_name || '', text: s.text || '' };
+}
+
+/** @提及落成快照：优先用当前成员缓存的名字，回落到此前的快照名（成员未加载时不清空已有名字） */
+function toMentionSnapshots(
+  input: Array<string | DraftMention>,
+  prev: DraftMention[],
+  nameOf: (accountId: string) => string,
+): DraftMention[] {
+  const out: DraftMention[] = [];
+  for (const item of input) {
+    const id = typeof item === 'string' ? item : item.account_id;
+    if (!id) continue;
+    const known = typeof item === 'string' ? '' : item.name;
+    const name = nameOf(id) || known || prev.find((p) => p.account_id === id)?.name || '';
+    out.push({ account_id: id, name });
+  }
+  return out;
+}
+
 interface ConvBrief {
   title: string;
   kind: 'direct' | 'group';
@@ -57,6 +113,8 @@ export const useChatStore = defineStore('chat', {
     loadingEarlier: false,
     /** conversation_id → 本地待发（sending/failed） */
     pending: {} as Record<string, PendingMessage[]>,
+    /** 未发送草稿：按会话隔离，写穿到本地存储（401 强退保留，仅主动登出清除）。 */
+    composerDrafts: readDrafts() as Record<string, ConversationDraft>,
     /** run_id → Run（run.updated / 发送响应 / 重试响应维护） */
     runs: {} as Record<string, Run>,
     /** conversation_id → account_id → 成员资料（群设置 / @ 选择 / 名称显示） */
@@ -475,6 +533,8 @@ export const useChatStore = defineStore('chat', {
     async fullResync(isCurrent: () => boolean = () => true) {
       const active = this.activeConversationId;
       this.resetAll();
+      // resetAll 只清内存：草稿是本地资产，不随服务端 resync 丢失
+      this.hydrateDrafts();
       try {
         await this.loadConversations(isCurrent);
       } catch {
@@ -496,7 +556,33 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    /** 清空全部本地状态（登出 / resync 复位） */
+    /** 更新草稿并写穿本地存储；正文、提及、引用都为空时自动清除该会话的草稿 */
+    updateComposerDraft(cid: string, patch: ComposerDraftPatch) {
+      if (!cid) return;
+      const prev: ConversationDraft = this.composerDrafts[cid] ?? EMPTY_DRAFT;
+      const nameOf = (accountId: string) => this.memberName(cid, accountId);
+      const next: ConversationDraft = {
+        text: patch.text ?? prev.text,
+        mentions: patch.mentions ? toMentionSnapshots(patch.mentions, prev.mentions, nameOf) : prev.mentions,
+        reply: patch.reply !== undefined ? toReplySnapshot(patch.reply, nameOf) : prev.reply,
+        updated_at: Date.now(),
+      };
+      const blank = !next.text.trim() && !next.mentions.length && !next.reply;
+      if (blank) {
+        delete this.composerDrafts[cid];
+        writeDraft(cid, null);
+        return;
+      }
+      this.composerDrafts[cid] = next;
+      writeDraft(cid, next);
+    },
+
+    /** 从本地存储重新装载草稿（冷启动 / resync 复位后） */
+    hydrateDrafts() {
+      this.composerDrafts = readDrafts() as Record<string, ConversationDraft>;
+    },
+
+    /** 清空全部本地状态（登出 / resync 复位）；草稿只在内存中清空，存储由 hydrateDrafts 决定 */
     resetAll() {
       this.conversations = [];
       this.convDetails = {};
@@ -504,6 +590,7 @@ export const useChatStore = defineStore('chat', {
       this.hasMore = {};
       this.snapshotLoaded = {};
       this.pending = {};
+      this.composerDrafts = {};
       this.runs = {};
       this.members = {};
       this.myRole = {};

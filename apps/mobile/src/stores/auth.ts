@@ -14,6 +14,7 @@ import {
 } from '../api/client';
 import { startEventsClient, stopEventsClient } from '../ws/events';
 import { useChatStore } from './chat';
+import { clearDrafts } from '../utils/drafts';
 import type { Account, AuthTokens } from '../api/types';
 
 function deviceSummary(): string {
@@ -57,6 +58,8 @@ export const useAuthStore = defineStore('auth', {
     async login(handle: string, password: string) {
       const data = await authApi.login({ handle, password, device_summary: deviceSummary() });
       this.applyAuth(data);
+      // 401 强退时草稿只从内存清掉，重新登录后要接着能写
+      useChatStore().hydrateDrafts();
       startEventsClient();
     },
 
@@ -79,6 +82,8 @@ export const useAuthStore = defineStore('auth', {
       stopEventsClient();
       this.resetLocal();
       useChatStore().resetAll();
+      // 主动登出才丢弃草稿；401 强退走 resetLocal，草稿保留待重新登录后接着写
+      clearDrafts();
     },
 
     /** 仅清本地（client.ts 强制登出路径 / 退出登录共用） */

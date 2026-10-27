@@ -1,99 +1,59 @@
 <template>
-  <view class="page stagger">
-    <view v-if="!detail && !loadError" class="empty">加载中…</view>
-    <view v-else-if="loadError" class="empty">{{ loadError }}</view>
-
-    <template v-if="detail">
-      <!-- 群信息 -->
-      <view class="card">
-        <view class="row-line">
-          <view class="group-title">{{ detail.title || '群聊' }}</view>
-          <text v-if="canManage && !closed" class="rename-btn" @tap="startRename">改名</text>
-        </view>
-        <view class="list-sub">
-          {{ detail.kind === 'group' ? '群聊' : '私聊' }} · {{ detail.members.length }} 名成员
-          <text v-if="closed" class="tag tag-offline">已解散</text>
-        </view>
-        <view class="list-sub">ID：{{ detail.conversation_id }}</view>
-        <view v-if="renaming" class="rename-box">
-          <input v-model="renameInput" class="input" placeholder="新群名（1-128 字符）" maxlength="128" />
-          <view class="btn btn-primary btn-small" @tap="confirmRename">保存</view>
-        </view>
-      </view>
-
-      <!-- 成员 -->
-      <view class="section-title">成员（角色：群主 / 管理员 / 成员；AI 不可任群主或管理员）</view>
-      <view
-        v-for="m in detail.members"
-        :key="m.membership_id"
-        class="list-item"
-      >
-        <view :class="['avatar', m.account.kind === 'ai' ? 'ai' : '']">
-          {{ (m.account.display_name || m.account.handle || '?').slice(0, 1).toUpperCase() }}
-        </view>
-        <view class="list-body">
-          <view class="row-line">
-            <text class="list-title">{{ m.account.display_name || m.account.handle }}</text>
-            <text v-if="m.account.kind === 'ai'" class="tag tag-ai">AI</text>
-            <text v-if="m.role === 'owner'" class="tag tag-owner">群主</text>
-            <text v-else-if="m.role === 'admin'" class="tag tag-admin">管理员</text>
+  <PageLayout title="群聊设置" eyebrow="SHARED SPACE" subtitle="让协作空间保持有序。" active="sessions" back :back-fallback="backFallback">
+    <InlineNotice v-if="loadError" tone="danger">{{ loadError }}<UiButton size="small" variant="ghost" @click="load">重新加载</UiButton></InlineNotice>
+    <view v-else-if="!detail" class="panel-hint">正在加载群聊…</view>
+    <view v-if="detail" class="detail-grid">
+      <view class="panel-stack">
+        <SectionPanel tone="mint">
+          <view class="hero-row"><AccountAvatar :name="detail.title" kind="group" size="large" /><view class="data-copy"><text class="hero-name">{{ detail.title || '群聊' }}</text><text class="data-description">{{ detail.members.length }} 位成员 · {{ closed ? '已归档' : '协作空间' }}</text></view><UiButton v-if="canManage && !closed" variant="secondary" size="small" icon="square-pen" @click="startRename">改名</UiButton></view>
+          <view v-if="renaming" class="button-row"><input v-model="renameInput" class="input rename-input" aria-label="新群名称" placeholder="输入新群名" maxlength="128" /><UiButton size="small" @click="confirmRename">保存</UiButton></view>
+        </SectionPanel>
+        <SectionPanel title="群聊成员" description="群主和管理员负责维护这个空间。" icon="users">
+          <template #action><UiButton v-if="canManage && !closed" variant="secondary" size="small" icon="user-plus" @click="invitePickerVisible = true">邀请</UiButton></template>
+          <view v-for="m in detail.members" :key="m.membership_id" class="data-row member-row">
+            <AccountAvatar :name="m.account.display_name || m.account.handle" :kind="m.account.kind === 'ai' ? 'agent' : 'human'" />
+            <view class="data-copy"><text class="data-title">{{ m.account.display_name || m.account.handle }}</text><text class="data-description">@{{ m.account.handle }}</text></view>
+            <StatusBadge :tone="m.role === 'owner' ? 'warning' : m.role === 'admin' ? 'primary' : m.account.kind === 'ai' ? 'violet' : 'neutral'">{{ m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : m.account.kind === 'ai' ? 'AI' : '成员' }}</StatusBadge>
+            <view v-if="!closed && m.account.account_id !== myAccountId" class="data-actions"><UiButton v-if="canManageRoles(m)" size="small" variant="secondary" @click="openRoleActions(m)">角色</UiButton><UiButton v-if="canManage" size="small" variant="danger" @click="removeMember(m)">移除</UiButton></view>
           </view>
-          <view class="list-sub">@{{ m.account.handle }}</view>
-        </view>
-        <view
-          class="list-end member-actions"
-          v-if="!closed && m.account.account_id !== myAccountId"
-        >
-          <view v-if="canManage" class="btn btn-danger btn-small" @tap="removeMember(m)">移除</view>
-          <text v-if="canManageRoles(m)" class="role-btn" @tap="openRoleActions(m)">角色</text>
-        </view>
+        </SectionPanel>
       </view>
-
-      <!-- 操作 -->
-      <view class="card" v-if="!closed">
-        <view v-if="canManage" class="btn btn-primary" @tap="invitePickerVisible = true">邀请成员</view>
-        <view v-if="!isOwner" class="btn btn-ghost" @tap="leaveGroup">退出群聊</view>
-        <view v-else class="btn btn-ghost btn-disabled">群主退出前需转让群主或解散群</view>
-        <view v-if="isOwner" class="btn btn-danger" @tap="dissolve">解散群聊</view>
-      </view>
-    </template>
-
-    <!-- 邀请选择 -->
-    <view v-if="invitePickerVisible" class="mask" @tap="invitePickerVisible = false">
-      <view class="sheet" @tap.stop>
-        <view class="sheet-title">选择要邀请的联系人（邀请 AI 需其所有者确认）</view>
-        <scroll-view scroll-y class="sheet-list">
-          <view
-            v-for="c in invitableContacts"
-            :key="c.account.account_id"
-            class="list-item"
-            @tap="toggleInvite(c.account.account_id)"
-          >
-            <view class="checkbox" :class="{ checked: inviteIds.includes(c.account.account_id) }">
-              {{ inviteIds.includes(c.account.account_id) ? '✓' : '' }}
-            </view>
-            <view class="list-body">
-              <view class="row-line">
-                <text class="list-title">{{ c.account.display_name || c.account.handle }}</text>
-                <text v-if="c.account.kind === 'ai'" class="tag tag-ai">AI</text>
-              </view>
-              <view class="list-sub">@{{ c.account.handle }}</view>
-            </view>
-          </view>
-          <view v-if="!invitableContacts.length" class="empty">没有可邀请的联系人</view>
-        </scroll-view>
-        <view class="sheet-footer">
-          <view class="btn btn-ghost btn-small" @tap="invitePickerVisible = false">取消</view>
-          <view class="btn btn-primary btn-small" :class="{ 'btn-disabled': !inviteIds.length }" @tap="invite">
-            发送邀请（{{ inviteIds.length }}）
-          </view>
-        </view>
+      <view class="panel-stack">
+        <SectionPanel title="空间说明" icon="shield-check">
+          <text class="panel-hint">人类与 AI 共享对话。AI 加入需其所有者确认，AI 不能担任群主或管理员。</text>
+          <view class="divider" /><text class="field-label">会话 ID</text><text class="technical-value">{{ detail.conversation_id }}</text>
+        </SectionPanel>
+        <SectionPanel v-if="!closed" title="退出与归档" description="操作前请确认对其他成员的影响。" icon="log-out" tone="danger">
+          <text v-if="isOwner" class="panel-hint">群主退出前需要转让群主，或解散当前群聊。解散后原成员仍可查看原有可见历史。</text>
+          <text v-else class="panel-hint">退出后将不再接收新消息，历史记录保留至退出时刻。</text>
+          <view class="button-row"><UiButton v-if="!isOwner" variant="danger" @click="leaveGroup">退出群聊</UiButton><UiButton v-else variant="danger" @click="dissolve">解散群聊</UiButton></view>
+        </SectionPanel>
+        <InlineNotice v-else>群聊已经解散，当前空间仅保留历史记录。</InlineNotice>
       </view>
     </view>
-  </view>
+    <template #overlay>
+      <BottomSheet :open="invitePickerVisible" title="邀请联系人加入" @close="invitePickerVisible = false">
+        <view class="invite-content"><text class="panel-hint">邀请 AI 时，需要其所有者确认后才能加入。</text>
+          <NativeButton v-for="c in invitableContacts" :key="c.account.account_id" class="invite-row" :aria-pressed="inviteIds.includes(c.account.account_id)" @click="toggleInvite(c.account.account_id)"><view class="checkbox" :class="{ checked: inviteIds.includes(c.account.account_id) }"><UiIcon v-if="inviteIds.includes(c.account.account_id)" name="check" tone="inverse" :size="14" /></view><AccountAvatar :name="c.account.display_name || c.account.handle" :kind="c.account.kind === 'ai' ? 'agent' : 'human'" size="small" /><view class="data-copy"><text class="data-title">{{ c.account.display_name || c.account.handle }}</text><text class="data-description">@{{ c.account.handle }}</text></view></NativeButton>
+          <EmptyState v-if="!invitableContacts.length" title="没有可邀请的联系人" icon="users" />
+        </view>
+        <template #footer><UiButton class="wide-button" :disabled="!inviteIds.length" @click="invite">发送 {{ inviteIds.length }} 份邀请</UiButton></template>
+      </BottomSheet>
+    </template>
+  </PageLayout>
 </template>
-
 <script setup lang="ts">
+import PageLayout from '../../components/layout/PageLayout.vue';
+import SectionPanel from '../../components/ui/SectionPanel.vue';
+import UiButton from '../../components/ui/UiButton.vue';
+import NativeButton from '../../components/ui/NativeButton.vue';
+import UiIcon from '../../components/ui/UiIcon.vue';
+import AccountAvatar from '../../components/ui/AccountAvatar.vue';
+import StatusBadge from '../../components/ui/StatusBadge.vue';
+import InlineNotice from '../../components/ui/InlineNotice.vue';
+import EmptyState from '../../components/ui/EmptyState.vue';
+import BottomSheet from '../../components/ui/BottomSheet.vue';
+
 import { computed, ref } from 'vue';
 import { onLoad, onShow } from '@dcloudio/uni-app';
 import * as chatApi from '../../api/chat';
@@ -101,12 +61,18 @@ import * as contactsApi from '../../api/contacts';
 import { useChatStore } from '../../stores/chat';
 import { useAuthStore } from '../../stores/auth';
 import { describeError } from '../../api/client';
+import type { BackFallback } from '../../utils/nav';
 import type { ContactItem, ConversationDetail, ConversationMember } from '../../api/types';
 
 const chatStore = useChatStore();
 const authStore = useAuthStore();
 
 const conversationId = ref('');
+
+/** 深链直达时页面栈只有一层，返回键应回到本群聊而不是会话列表 */
+const backFallback = computed<BackFallback>(() => conversationId.value
+  ? { url: '/pages/chat/chat?id=' + encodeURIComponent(conversationId.value) }
+  : { url: '/pages/sessions/sessions', tab: true });
 const detail = ref<ConversationDetail | null>(null);
 const loadError = ref('');
 
@@ -301,46 +267,4 @@ function dissolve() {
   });
 }
 </script>
-
-<style lang="scss" scoped>
-.row-line {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-.group-title {
-  font-size: 34rpx;
-  font-weight: 600;
-}
-.rename-btn {
-  margin-left: auto;
-  font-size: 24rpx;
-  color: var(--accent);
-  padding: 4rpx 12rpx;
-}
-.rename-box {
-  display: flex;
-  gap: 16rpx;
-  align-items: center;
-  margin-top: 20rpx;
-  .input {
-    flex: 1;
-  }
-}
-.member-actions {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-}
-.role-btn {
-  font-size: 24rpx;
-  color: var(--accent);
-  padding: 8rpx 16rpx;
-}
-.sheet-footer {
-  display: flex;
-  gap: 16rpx;
-  padding: 20rpx 24rpx;
-  justify-content: flex-end;
-}
-</style>
+<style scoped>.rename-input { flex: 1; min-width: 0; }.invite-content { padding: 0 20px 20px; }.invite-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 15px 0; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; }.invite-row::after { display: none; }.invite-row .checkbox { margin: 0; }@media(max-width:767px){.member-row { flex-wrap: wrap; }.member-row .data-actions { margin-left: auto; }}</style>

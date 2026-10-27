@@ -15,6 +15,8 @@ import { AUTH_EXPIRED_EVENT } from './api/client';
 onLaunch(() => {
   const authStore = useAuthStore();
   authStore.loadFromStorage();
+  // 冷启动恢复未发送草稿（401 强退后重新登录也靠这里/登录成功时装载）
+  useChatStore().hydrateDrafts();
 
   uni.$on(AUTH_EXPIRED_EVENT, () => {
     stopEventsClient();

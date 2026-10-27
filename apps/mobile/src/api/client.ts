@@ -10,6 +10,7 @@
  * 5. 维护「错误码 → 用户可读中文文案」映射 describeError()。
  */
 import type { Account, AccountBrief, ApiErrorBody } from './types';
+import { normalizeServerOrigin } from '../pages/login/model';
 
 /* ---------------- 本地存储键 ---------------- */
 
@@ -20,6 +21,8 @@ export const STORAGE_KEYS = {
   account: 'aichat.account',
   /** 事件游标（大数十进制字符串），由 stores/chat.ts 持久化 */
   eventCursor: 'aichat.event_cursor',
+  /** 未发送草稿（跨冷启动保留；401 强退不清，主动登出才清），见 utils/drafts.ts */
+  drafts: 'aichat.drafts',
 } as const;
 
 /** client.ts 在刷新失败清理凭据后广播该事件；App.vue 监听并复位本地状态/停止 WSS */
@@ -146,11 +149,7 @@ export function getServerBase(): string {
  * 仅接受完整 origin（http:// 或 https://），WSS 地址由其推导（http→ws / https→wss）。
  */
 export function setServerBase(url: string): string {
-  const t = (url || '').trim();
-  if (!/^https?:\/\/.+/i.test(t)) {
-    throw new Error('服务器地址必须以 http:// 或 https:// 开头');
-  }
-  const normalized = t.replace(/\/+$/, '');
+  const normalized = normalizeServerOrigin(url);
   uni.setStorageSync(STORAGE_KEYS.serverBase, normalized);
   return normalized;
 }

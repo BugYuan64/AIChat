@@ -5,6 +5,7 @@
   "description": "AIChat 移动端（uni-app + Vue 3 + TypeScript + Pinia）",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
+    "icons:generate": "node scripts/gen-ui-icons.mjs",
     "dev:h5": "uni",
     "dev:app": "uni -p app",
     "dev:mp-weixin": "uni -p mp-weixin",
@@ -27,14 +28,21 @@
     "@dcloudio/uni-cli-shared": "3.0.0-4020920240930001",
     "@dcloudio/uni-mp-weixin": "3.0.0-4020920240930001",
     "@dcloudio/vite-plugin-uni": "3.0.0-4020920240930001",
+    "@iconify-json/lucide": "1.2.147",
+    "@iconify/utils": "3.1.7",
     "@types/node": "^20.12.7",
     "@vue/runtime-core": "3.4.21",
     "sass": "^1.75.0",
+    "sharp": "0.35.5",
     "typescript": "^5.4.5",
     "vite": "5.2.8",
-    "vue-tsc": "^2.0.13"
+    "vue-tsc": "^2.0.13",
+    "ws": "8.18.3"
+  },
+  "overrides": {
+    "vue-router": "4.3.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.9"
   }
 }

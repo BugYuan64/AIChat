@@ -1,146 +1,78 @@
 <template>
-  <view class="page">
-    <!-- 搜索（按账号名精确查找） -->
-    <view class="card search-card">
-      <view class="search-row">
-        <input v-model="searchHandle" class="input" placeholder="输入对方账号名（handle）精确查找" confirm-type="search" @confirm="doSearch" />
-        <view class="btn btn-primary btn-small" @tap="doSearch">查找</view>
+  <PageLayout title="联系人" eyebrow="PEOPLE & CONNECTIONS" subtitle="找到伙伴，让对话自然发生。" active="contacts">
+    <template #actions><UiButton icon="users" @click="enterSelectMode">创建群聊</UiButton></template>
+    <view class="contacts-layout">
+      <view class="panel-stack">
+        <SectionPanel title="添加新伙伴" description="按完整账号名精确查找" icon="user-plus" tone="mint">
+          <input v-model="searchHandle" class="input" aria-label="查找账号名" placeholder="输入对方的账号名" confirm-type="search" @confirm="doSearch" />
+          <UiButton class="wide-button search-button" icon="search" @click="doSearch">查找账号</UiButton>
+          <text class="panel-hint search-hint">人类或 AI 都可以成为联系人。AI 联系申请由其所有者处理。</text>
+          <InlineNotice v-if="searchError" tone="danger">{{ searchError }}</InlineNotice>
+          <InlineNotice v-if="searchMiss">没有找到这个账号，请检查完整账号名。</InlineNotice>
+        </SectionPanel>
+        <view class="contact-tabs">
+          <NativeButton class="contact-tab" :class="{ active: segment === 'list' }" @click="switchSegment('list')"><UiIcon name="users" :size="18" /><text>我的联系人</text><text class="tab-count">{{ contacts.length }}</text></NativeButton>
+          <NativeButton class="contact-tab" :class="{ active: segment === 'requests' }" @click="switchSegment('requests')"><UiIcon name="user-plus" :size="18" /><text>联系人申请</text><text v-if="incoming.length" class="tab-count request-count">{{ incoming.length }}</text></NativeButton>
+        </view>
       </view>
-      <view v-if="searchResult" class="search-result enter-rise">
-        <view class="list-body">
-          <view class="row-line">
-            <text class="list-title">{{ searchResult.display_name || searchResult.handle }}</text>
-            <text :class="['tag', searchResult.kind === 'ai' ? 'tag-ai' : '']">{{ searchResult.kind === 'ai' ? 'AI' : '人类' }}</text>
+      <SectionPanel :title="segment === 'list' ? '一起协作的人与 AI' : '连接请求'" :description="segment === 'list' ? '从一条消息开始新的协作。' : '收到与发出的申请都在这里。'">
+        <InlineNotice v-if="pageError" tone="danger">{{ pageError }}<UiButton variant="ghost" size="small" @click="refresh">重新加载</UiButton></InlineNotice>
+        <view v-if="searchResult" class="search-match">
+          <StatusBadge tone="success" icon="check">找到账号</StatusBadge>
+          <view class="data-row"><AccountAvatar :name="searchResult.display_name || searchResult.handle" :kind="searchResult.kind === 'ai' ? 'agent' : 'human'" /><view class="data-copy"><text class="data-title">{{ searchResult.display_name || searchResult.handle }}</text><text class="data-description">@{{ searchResult.handle }}</text></view></view>
+          <view class="button-row"><UiButton size="small" icon="user-plus" @click="addContact(searchResult)">添加联系人</UiButton><UiButton size="small" variant="secondary" icon="message-circle" @click="openDirect(searchResult)">发消息</UiButton></view>
+        </view>
+        <view v-if="loading" class="panel-hint">正在同步联系人…</view>
+        <template v-if="segment === 'list'">
+          <view v-for="item in contacts" :key="item.account.account_id" class="data-row contact-row">
+            <AccountAvatar :name="item.account.display_name || item.account.handle" :kind="item.account.kind === 'ai' ? 'agent' : 'human'" />
+            <view class="data-copy"><text class="data-title">{{ item.account.display_name || item.account.handle }}</text><text class="data-description">@{{ item.account.handle }}</text></view>
+            <StatusBadge v-if="item.relation === 'pending_outgoing'" tone="warning">已申请</StatusBadge>
+            <StatusBadge v-else-if="item.account.kind === 'ai'" tone="violet">AI</StatusBadge>
+            <view class="data-actions"><UiButton v-if="item.relation === 'connected'" variant="ghost" size="icon" icon="message-circle" :label="'向' + item.account.handle + '发消息'" @click="openDirect(item.account)" /><UiButton variant="ghost" size="icon" icon="ellipsis" :label="item.account.handle + '的更多操作'" @click="moreActions(item)" /></view>
           </view>
-          <view class="list-sub">@{{ searchResult.handle }}</view>
-        </view>
-        <view class="list-end">
-          <view class="btn btn-primary btn-small" @tap="addContact(searchResult)">加联系人</view>
-          <view class="btn btn-ghost btn-small" @tap="openDirect(searchResult)">发消息</view>
-        </view>
-      </view>
-      <view v-if="searchMiss" class="list-sub">未找到该账号（需精确匹配账号名）</view>
+          <EmptyState v-if="!loading && !pageError && !contacts.length" icon="users" title="在这里遇见协作伙伴" description="在左侧或上方搜索账号，添加你的第一位联系人。" />
+        </template>
+        <template v-else>
+          <text class="request-heading">收到的申请</text>
+          <view v-for="item in incoming" :key="item.request_id" class="data-row contact-row"><AccountAvatar :name="item.account.display_name || item.account.handle" :kind="item.account.kind === 'ai' ? 'agent' : 'human'" /><view class="data-copy"><text class="data-title">{{ item.account.display_name || item.account.handle }}</text><text class="data-description">@{{ item.account.handle }}{{ item.account.kind === 'ai' ? ' · AI 所有者代批' : '' }}</text></view><view class="data-actions"><UiButton size="small" @click="decide(item, 'accept')">接受</UiButton><UiButton variant="secondary" size="small" @click="decide(item, 'reject')">拒绝</UiButton></view></view>
+          <EmptyState v-if="!incoming.length && !loading" icon="circle-check" title="暂无待处理申请" />
+          <text class="request-heading">我发出的申请</text>
+          <view v-for="item in outgoing" :key="item.account.account_id" class="data-row"><AccountAvatar :name="item.account.display_name || item.account.handle" /><view class="data-copy"><text class="data-title">{{ item.account.display_name || item.account.handle }}</text><text class="data-description">等待对方处理</text></view><StatusBadge tone="warning">等待中</StatusBadge></view>
+        </template>
+      </SectionPanel>
     </view>
-
-    <!-- 分栏：联系人 / 待处理申请 -->
-    <view class="segmented">
-      <text :class="['seg-item', segment === 'list' ? 'active' : '']" @tap="switchSegment('list')">
-        联系人 {{ contacts.length ? `(${contacts.length})` : '' }}
-      </text>
-      <text :class="['seg-item', segment === 'requests' ? 'active' : '']" @tap="switchSegment('requests')">
-        待处理 {{ incoming.length ? `(${incoming.length})` : '' }}
-      </text>
-    </view>
-
-    <!-- 建群入口 -->
-    <view v-if="segment === 'list' && !selectMode" class="group-entry enter-rise" @tap="enterSelectMode">
-      发起群聊（从联系人中选择成员）
-    </view>
-
-    <!-- 联系人列表 -->
-    <view v-if="segment === 'list'">
-      <view v-if="loading && !contacts.length" class="card">
-        <view v-for="i in 3" :key="'sk' + i" class="skeleton-row">
-          <view class="skeleton skeleton-avatar"></view>
-          <view class="skeleton-lines">
-            <view class="skeleton skeleton-line l1"></view>
-            <view class="skeleton skeleton-line l2"></view>
-          </view>
+    <template #overlay>
+      <BottomSheet :open="selectMode" title="创建群聊" @close="exitSelectMode">
+        <view class="group-form"><label class="field-label">给群聊起个名字</label><input v-model="groupTitle" class="input" placeholder="例如：周末项目组" aria-label="群名称" :maxlength="64" /><text class="panel-hint">选择要邀请的联系人，邀请会在创建后发送。</text>
+          <NativeButton v-for="item in connectedContacts" :key="item.account.account_id" class="pick-row" :aria-pressed="selectedIds.includes(item.account.account_id)" @click="toggleSelect(item.account.account_id)"><view class="checkbox" :class="{ checked: selectedIds.includes(item.account.account_id) }"><UiIcon v-if="selectedIds.includes(item.account.account_id)" name="check" tone="inverse" :size="14" /></view><AccountAvatar :name="item.account.display_name || item.account.handle" :kind="item.account.kind === 'ai' ? 'agent' : 'human'" size="small" /><view class="data-copy"><text class="data-title">{{ item.account.display_name || item.account.handle }}</text><text class="data-description">@{{ item.account.handle }}</text></view></NativeButton>
+          <EmptyState v-if="!connectedContacts.length" icon="users" title="还没有可邀请的联系人" />
         </view>
-      </view>
-      <view v-if="!contacts.length && !loading" class="empty">还没有联系人,先通过上方搜索添加</view>
-
-      <!-- 普通模式 -->
-      <view v-if="!selectMode" class="stagger">
-        <view v-for="item in contacts" :key="item.account.account_id" class="list-item">
-          <view :class="['avatar', item.account.kind === 'ai' ? 'ai' : '']">
-            {{ (item.account.display_name || item.account.handle || '?').slice(0, 1).toUpperCase() }}
-          </view>
-          <view class="list-body" @tap="openDirect(item.account)">
-            <view class="row-line">
-              <text class="list-title">{{ item.account.display_name || item.account.handle }}</text>
-              <text :class="['tag', item.account.kind === 'ai' ? 'tag-ai' : '']">{{ item.account.kind === 'ai' ? 'AI' : '人类' }}</text>
-              <text v-if="item.relation === 'pending_outgoing'" class="tag">已申请</text>
-            </view>
-            <view class="list-sub">@{{ item.account.handle }}</view>
-          </view>
-          <view class="list-end">
-            <view v-if="item.relation === 'connected'" class="btn btn-ghost btn-small" @tap="openDirect(item.account)">发消息</view>
-            <view class="btn btn-ghost btn-small" @tap="moreActions(item)">···</view>
-          </view>
-        </view>
-      </view>
-
-      <!-- 建群多选模式 -->
-      <view v-else class="stagger">
-        <view
-          v-for="item in connectedContacts"
-          :key="item.account.account_id"
-          class="list-item"
-          @tap="toggleSelect(item.account.account_id)"
-        >
-          <view class="checkbox" :class="{ checked: selectedIds.includes(item.account.account_id) }">
-            {{ selectedIds.includes(item.account.account_id) ? '✓' : '' }}
-          </view>
-          <view class="list-body">
-            <view class="row-line">
-              <text class="list-title">{{ item.account.display_name || item.account.handle }}</text>
-              <text :class="['tag', item.account.kind === 'ai' ? 'tag-ai' : '']">{{ item.account.kind === 'ai' ? 'AI' : '人类' }}</text>
-            </view>
-            <view class="list-sub">@{{ item.account.handle }}</view>
-          </view>
-        </view>
-        <view v-if="!connectedContacts.length" class="empty">没有可选联系人</view>
-      </view>
-    </view>
-
-    <!-- 待处理申请 -->
-    <view v-if="segment === 'requests'" class="stagger">
-      <view v-if="!incoming.length && !outgoing.length && !loading" class="empty">暂无待处理申请</view>
-      <view class="section-title">收到的申请</view>
-      <view v-for="item in incoming" :key="item.account.account_id" class="list-item">
-        <view class="avatar">{{ (item.account.display_name || item.account.handle || '?').slice(0, 1).toUpperCase() }}</view>
-        <view class="list-body">
-          <view class="row-line">
-            <text class="list-title">{{ item.account.display_name || item.account.handle }}</text>
-            <text :class="['tag', item.account.kind === 'ai' ? 'tag-ai' : '']">{{ item.account.kind === 'ai' ? 'AI（所有者代批）' : '人类' }}</text>
-          </view>
-          <view class="list-sub">@{{ item.account.handle }}</view>
-        </view>
-        <view class="list-end">
-          <view class="btn btn-primary btn-small" @tap="decide(item, 'accept')">接受</view>
-          <view class="btn btn-ghost btn-small" @tap="decide(item, 'reject')">拒绝</view>
-        </view>
-      </view>
-      <view class="section-title">我发出的申请</view>
-      <view v-for="item in outgoing" :key="item.account.account_id" class="list-item">
-        <view class="avatar">{{ (item.account.display_name || item.account.handle || '?').slice(0, 1).toUpperCase() }}</view>
-        <view class="list-body">
-          <text class="list-title">{{ item.account.display_name || item.account.handle }}</text>
-          <view class="list-sub">@{{ item.account.handle }} · 等待对方处理</view>
-        </view>
-      </view>
-    </view>
-
-    <!-- 建群底栏 -->
-    <view v-if="selectMode" class="group-bar">
-      <input v-model="groupTitle" class="input group-title-input" placeholder="群名称" :maxlength="64" />
-      <view class="btn btn-ghost btn-small" @tap="exitSelectMode">取消</view>
-      <view class="btn btn-primary btn-small" :class="{ 'btn-disabled': !groupTitle.trim() || !selectedIds.length }" @tap="createGroup">
-        创建（{{ selectedIds.length }}）
-      </view>
-    </view>
-  </view>
+        <template #footer><UiButton class="wide-button" :disabled="!groupTitle.trim() || !selectedIds.length" @click="createGroup">创建并邀请 {{ selectedIds.length }} 位成员</UiButton></template>
+      </BottomSheet>
+    </template>
+  </PageLayout>
 </template>
 
 <script setup lang="ts">
+import PageLayout from '../../components/layout/PageLayout.vue';
+import SectionPanel from '../../components/ui/SectionPanel.vue';
+import UiButton from '../../components/ui/UiButton.vue';
+import NativeButton from '../../components/ui/NativeButton.vue';
+import UiIcon from '../../components/ui/UiIcon.vue';
+import AccountAvatar from '../../components/ui/AccountAvatar.vue';
+import StatusBadge from '../../components/ui/StatusBadge.vue';
+import InlineNotice from '../../components/ui/InlineNotice.vue';
+import EmptyState from '../../components/ui/EmptyState.vue';
+import BottomSheet from '../../components/ui/BottomSheet.vue';
+
 import { computed, ref } from 'vue';
 import { onPullDownRefresh, onShow } from '@dcloudio/uni-app';
 import * as contactsApi from '../../api/contacts';
 import * as chatApi from '../../api/chat';
 import { useChatStore } from '../../stores/chat';
 import { useAuthStore } from '../../stores/auth';
-import { describeError } from '../../api/client';
+import { describeError, ApiClientError } from '../../api/client';
 import { genClientMessageId } from '../../utils/misc';
 import type { AccountBrief, ContactItem } from '../../api/types';
 
@@ -148,6 +80,8 @@ const chatStore = useChatStore();
 const authStore = useAuthStore();
 
 const loading = ref(false);
+const pageError = ref('');
+const searchError = ref('');
 const segment = ref<'list' | 'requests'>('list');
 const items = ref<ContactItem[]>([]);
 
@@ -181,12 +115,13 @@ onPullDownRefresh(async () => {
 
 async function refresh() {
   loading.value = true;
+  pageError.value = '';
   try {
     const res = await contactsApi.listContacts();
     items.value = res.items ?? [];
     chatStore.cacheAccounts(items.value.map((i) => i.account));
   } catch (e) {
-    uni.showToast({ title: describeError(e), icon: 'none' });
+    pageError.value = describeError(e);
   } finally {
     loading.value = false;
   }
@@ -203,6 +138,7 @@ async function doSearch() {
   const h = searchHandle.value.trim();
   searchResult.value = null;
   searchMiss.value = false;
+  searchError.value = '';
   if (!h) {
     uni.showToast({ title: '请输入账号名', icon: 'none' });
     return;
@@ -210,7 +146,8 @@ async function doSearch() {
   try {
     searchResult.value = await contactsApi.findAccountByHandle(h);
   } catch (e) {
-    searchMiss.value = true;
+    if (e instanceof ApiClientError && e.code === 'NOT_FOUND') searchMiss.value = true;
+    else searchError.value = describeError(e);
   }
 }
 
@@ -307,63 +244,7 @@ async function createGroup() {
   }
 }
 </script>
-
-<style lang="scss" scoped>
-.search-card {
-  padding: 24rpx;
-}
-.search-row {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-  .input {
-    flex: 1;
-  }
-}
-.search-result {
-  display: flex;
-  align-items: center;
-  margin-top: 24rpx;
-  padding: 20rpx;
-  background: var(--surface-soft);
-  border-radius: 20rpx;
-}
-.row-line {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-.group-entry {
-  margin: 0 24rpx 24rpx;
-  padding: 26rpx;
-  border-radius: 20rpx;
-  background: var(--surface);
-  color: var(--accent);
-  font-size: 26rpx;
-  text-align: center;
-  border: 1rpx dashed var(--control-line);
-}
-.group-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-  padding: 20rpx 24rpx calc(20rpx + env(safe-area-inset-bottom));
-  background: var(--surface);
-  border-top: 1rpx solid var(--line);
-  z-index: 99;
-}
-.group-title-input {
-  flex: 1;
-}
-/* H5 桌面:底栏跟随居中内容列 */
-@media (min-width: 768px) {
-  .group-bar {
-    max-width: 720px;
-    margin: 0 auto;
-  }
-}
+<style scoped>
+.contacts-layout { display: grid; grid-template-columns: minmax(0,1fr); gap: 24px; }.search-button { margin-top: 12px; }.search-hint { margin: 16px 0 0; }.contact-tabs { display: flex; gap: 6px; flex-direction: column; }.contact-tab { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 14px; border: 1px solid transparent; border-radius: 14px; background: transparent; color: var(--text-secondary); text-align: left; font-size: 13px; font-weight: 650; }.contact-tab.active { background: var(--surface); border-color: var(--line); color: var(--text); }.tab-count { margin-left: auto; font-size: 11px; }.request-count { background: var(--violet-soft); color: var(--violet); padding: 3px 8px; border-radius: 30px; }.search-match { padding: 16px; margin-bottom: 18px; border: 1px solid #c6d7bf; border-radius: 16px; background: var(--accent-soft); }.request-heading { display: block; margin-top: 16px; color: var(--text-secondary); font-size: 12px; font-weight: 700; }.group-form { padding: 0 20px 20px; }.group-form > .panel-hint { margin: 12px 0; }.pick-row { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 70px; padding: 10px 0; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; }.pick-row::after { display: none; }.pick-row .checkbox { margin: 0; }
+@media(min-width:1100px) { .contacts-layout { grid-template-columns: 280px minmax(0,1fr); } }@media(max-width:380px) { .contact-row { flex-wrap: wrap; }.contact-row .data-actions { margin-left: auto; } }
 </style>

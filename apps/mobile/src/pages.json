@@ -2,48 +2,48 @@
   "pages": [
     {
       "path": "pages/login/login",
-      "style": { "navigationBarTitleText": "登录 AIChat" }
+      "style": { "navigationBarTitleText": "登录 AIChat", "navigationStyle": "custom" }
     },
     {
       "path": "pages/sessions/sessions",
-      "style": { "navigationBarTitleText": "会话", "enablePullDownRefresh": true }
+      "style": { "navigationBarTitleText": "会话", "navigationStyle": "custom" }
     },
     {
       "path": "pages/contacts/contacts",
-      "style": { "navigationBarTitleText": "联系人", "enablePullDownRefresh": true }
+      "style": { "navigationBarTitleText": "联系人", "navigationStyle": "custom" }
     },
     {
       "path": "pages/me/me",
-      "style": { "navigationBarTitleText": "我的" }
+      "style": { "navigationBarTitleText": "我的", "navigationStyle": "custom" }
     },
     {
       "path": "pages/chat/chat",
-      "style": { "navigationBarTitleText": "聊天", "app-plus": { "bounce": "none" } }
+      "style": { "navigationBarTitleText": "聊天", "navigationStyle": "custom", "app-plus": { "bounce": "none" } }
     },
     {
       "path": "pages/agents/agents",
-      "style": { "navigationBarTitleText": "我的 AI" }
+      "style": { "navigationBarTitleText": "我的 AI", "navigationStyle": "custom" }
     },
     {
       "path": "pages/agents/detail",
-      "style": { "navigationBarTitleText": "AI 详情" }
+      "style": { "navigationBarTitleText": "AI 详情", "navigationStyle": "custom" }
     },
     {
       "path": "pages/group/settings",
-      "style": { "navigationBarTitleText": "群设置" }
+      "style": { "navigationBarTitleText": "群设置", "navigationStyle": "custom" }
     },
     {
       "path": "pages/pairing/scan",
-      "style": { "navigationBarTitleText": "连接器配对" }
+      "style": { "navigationBarTitleText": "连接器配对", "navigationStyle": "custom" }
     },
     {
       "path": "pages/runs/detail",
-      "style": { "navigationBarTitleText": "运行详情" }
+      "style": { "navigationBarTitleText": "运行详情", "navigationStyle": "custom" }
     }
   ],
   "tabBar": {
-    "color": "#606d63",
-    "selectedColor": "#216a50",
+    "color": "#5f6d64",
+    "selectedColor": "#196b55",
     "backgroundColor": "#ffffff",
     "borderStyle": "black",
     "list": [
@@ -71,6 +71,6 @@
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "AIChat",
     "navigationBarBackgroundColor": "#ffffff",
-    "backgroundColor": "#f5f6f4"
+    "backgroundColor": "#f4f5f1"
   }
 }
