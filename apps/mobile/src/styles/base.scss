@@ -165,17 +165,22 @@ page {
 }
 .input,
 .textarea {
+  /* uni-h5 默认给 uni-input 设 height:1.4em;border-box 下加上下 padding 会把
+     内层真实 input 压成 0 高(键入文字不可见),必须显式撑回内容高度 */
+  height: 88rpx;
   width: 100%;
   background: var(--surface);
   border: 1rpx solid var(--control-line);
   border-radius: 20rpx;
-  padding: 20rpx 24rpx;
+  padding: 0 24rpx;
   font-size: 30rpx;
   color: var(--text);
   box-sizing: border-box;
 }
 .textarea {
   min-height: 140rpx;
+  height: auto;
+  padding: 20rpx 24rpx;
 }
 
 .btn {

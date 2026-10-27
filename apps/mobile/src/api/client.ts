@@ -89,13 +89,27 @@ const ERROR_MESSAGES: Record<string, string> = {
   [ErrorCodes.HTTP_ERROR]: '请求失败，请稍后重试',
 };
 
-/** 任意异常 → 中文提示（页面 toast 统一使用） */
+/** 任意异常 → 中文提示（页面 toast 统一使用）
+ *  AUTH_INVALID 双义:登录/刷新接口返回时是"凭据错误",其他接口返回时是"会话失效"。
+ *  凭登录页上下文区分文案,避免密码错误被误报成"登录已过期"。 */
 export function describeError(e: unknown): string {
   if (e instanceof ApiClientError) {
+    if (e.code === ErrorCodes.AUTH_INVALID) {
+      return isLoginContext()
+        ? '账号名或密码错误'
+        : ERROR_MESSAGES[ErrorCodes.AUTH_INVALID];
+    }
     return ERROR_MESSAGES[e.code] ?? (e.message || '请求失败');
   }
   if (e instanceof Error && e.message) return e.message;
   return '请求失败';
+}
+
+/** 当前页面是否为登录页(登录/注册表单的错误都按"凭据错误"表述) */
+function isLoginContext(): boolean {
+  const pages = getCurrentPages();
+  const route = pages[pages.length - 1]?.route ?? '';
+  return route.includes('login');
 }
 
 /* ---------------- ApiClientError ---------------- */
