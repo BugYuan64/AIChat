@@ -66,8 +66,18 @@ npm install
 npm run dev:h5          # 浏览器开发（默认 5173 端口）
 npm run build:h5        # H5 构建
 npm run dev:app         # App 开发（需 HBuilderX 基座或自行配置基座）
-npm run build:app
+VITE_AICHAT_SERVER=https://api.aichat.wsnbb.shop npm run build:app
 ```
+
+> **App 构建必须带 `VITE_AICHAT_SERVER`**：不带时默认回落 `http://127.0.0.1:8000`，
+> 安卓真机上连不上任何后端（表现为登录一直「网络异常」）。App 平台没有 H5 的跨域限制，
+> 预置生产地址后 `uni.request`/WSS 直连即可。
+> 产物在 `dist/build/app`，需用 HBuilderX 导入该工程（或将其作为资源目录）进行云打包/真机运行。
+
+**App 平台输入框样式注意**：App 端与 H5 同为 WebView 渲染，运行时默认同样给
+`uni-input` 设 `height:1.4em`。全局 `.input` 样式已显式设置 `height: 88rpx` 并只保留
+水平 padding 来覆盖它——给输入框自定义样式时不要再加上下 padding（border-box 下会把
+内层真实 input 压成 0 高，键入文字不可见），多行输入请用 `.textarea`（`height:auto` + `min-height`）。
 
 ### HBuilderX
 
