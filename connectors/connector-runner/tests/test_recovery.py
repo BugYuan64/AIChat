@@ -106,7 +106,7 @@ async def test_output_limit_is_applied_before_chunk_is_persisted_or_sent(tmp_pat
     ledger.upsert('execution', run_id='run', status='accepted', attempt_no=1, fencing_token=1)
     sent = []
     class Adapter:
-        async def run(self, context, system_prompt):
+        async def run(self, context, system_prompt, session_key=None, execution_policy=None):
             yield 'ab'
             yield '你好c'
     class Socket:
@@ -131,7 +131,7 @@ async def test_adapter_exception_body_is_not_published_in_run_error(tmp_path):
     ledger.upsert('execution', run_id='run', status='accepted', attempt_no=1, fencing_token=1)
     sent = []
     class Adapter:
-        async def run(self, context, system_prompt):
+        async def run(self, context, system_prompt, session_key=None, execution_policy=None):
             raise RuntimeError('upstream private response secret-token')
             yield ''
     class Socket:

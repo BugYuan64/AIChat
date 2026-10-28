@@ -1,7 +1,10 @@
 """本地执行账本（sqlite3）：按 execution_id 去重、断线重连恢复依据。
 
-字段：execution_id 主键、run_id、status、chunks（JSON 数组）、final_text、updated_at，
-另存 attempt_no / fencing_token 便于审计。
+两张表：
+- executions：execution_id 主键、run_id、status、chunks（JSON 数组）、final_text、
+  updated_at，另存 attempt_no / fencing_token 便于审计。
+- sessions：外部 Agent 的会话索引。CLI 的会话状态活在它自己那边（磁盘或守护进程），
+  账本只记"这个对话该用哪个 session id 续接"。没有它，连接器一重启就丢失上下文线索。
 """
 
 from __future__ import annotations
@@ -25,6 +28,15 @@ CREATE TABLE IF NOT EXISTS executions (
     updated_at    TEXT NOT NULL,
     attempt_no    INTEGER,
     fencing_token TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    session_key         TEXT NOT NULL,
+    adapter_kind        TEXT NOT NULL,
+    external_session_id TEXT,
+    cwd                 TEXT,
+    updated_at          TEXT NOT NULL,
+    PRIMARY KEY (session_key, adapter_kind)
 );
 """
 
@@ -59,6 +71,27 @@ def _row_to_record(row: sqlite3.Row) -> ExecutionRecord:
         updated_at=row["updated_at"],
         attempt_no=row["attempt_no"],
         fencing_token=row["fencing_token"],
+    )
+
+
+@dataclass(frozen=True)
+class SessionRecord:
+    """一条外部 Agent 会话索引。external_session_id 为 None 表示尚未建立会话。"""
+
+    session_key: str
+    adapter_kind: str
+    external_session_id: str | None
+    cwd: str | None
+    updated_at: str
+
+
+def _row_to_session(row: sqlite3.Row) -> SessionRecord:
+    return SessionRecord(
+        session_key=row["session_key"],
+        adapter_kind=row["adapter_kind"],
+        external_session_id=row["external_session_id"],
+        cwd=row["cwd"],
+        updated_at=row["updated_at"],
     )
 
 
@@ -138,6 +171,55 @@ class Ledger:
     def list_all(self) -> list[ExecutionRecord]:
         rows = self._conn.execute("SELECT * FROM executions ORDER BY updated_at").fetchall()
         return [_row_to_record(r) for r in rows]
+
+    # ---- 外部会索引 ----
+
+    def get_session(self, session_key: str, adapter_kind: str) -> SessionRecord | None:
+        row = self._conn.execute(
+            "SELECT * FROM sessions WHERE session_key = ? AND adapter_kind = ?",
+            (session_key, adapter_kind),
+        ).fetchone()
+        return _row_to_session(row) if row is not None else None
+
+    def save_session(
+        self,
+        session_key: str,
+        adapter_kind: str,
+        *,
+        external_session_id: str | None = None,
+        cwd: str | None = None,
+    ) -> None:
+        """记录/更新会话索引；外部 session id 为 None 时不覆盖已有值。"""
+        existing = self.get_session(session_key, adapter_kind)
+        effective_id = (
+            external_session_id
+            if external_session_id is not None
+            else (existing.external_session_id if existing else None)
+        )
+        effective_cwd = cwd if cwd is not None else (existing.cwd if existing else None)
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO sessions
+                    (session_key, adapter_kind, external_session_id, cwd, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    session_key,
+                    adapter_kind,
+                    effective_id,
+                    effective_cwd,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
+    def clear_session(self, session_key: str, adapter_kind: str) -> None:
+        """丢弃失效会话（如 --resume 失败），下次运行会新建。"""
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM sessions WHERE session_key = ? AND adapter_kind = ?",
+                (session_key, adapter_kind),
+            )
 
     def close(self) -> None:
         self._conn.close()

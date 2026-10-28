@@ -13,6 +13,17 @@ class AgentPatchIn(BaseModel):
     status: str | None = Field(default=None, pattern=r"^(active|disabled)$")
 
 
+class AgentPolicyIn(BaseModel):
+    """CLI agent 的执行权限配置。
+
+    permission_mode 必须显式选择：`zcode -p` 自身默认 yolo（全自动批准），
+    平台不能把这个默认值静默继承给用户。
+    """
+
+    permission_mode: str = Field(pattern=r"^(plan|edit|build|yolo|guarded)$")
+    workspace_dir: str | None = Field(default=None, max_length=512)
+
+
 class ModelBindingIn(BaseModel):
     provider_code: str
     credential: str = Field(min_length=8, max_length=4096)  # 模型 API 密钥，仅本次请求出现
@@ -42,6 +53,14 @@ def agent_out(account, profile, binding=None, connector=None) -> dict:
         "bio": account.bio,
         "status": account.status,
         "owner_account_id": profile.owner_account_id if profile else None,
+        "policy": (
+            {
+                "permission_mode": profile.permission_mode,
+                "workspace_dir": profile.workspace_dir,
+            }
+            if profile is not None
+            else None
+        ),
         "binding": (
             {
                 "mode": binding.mode,

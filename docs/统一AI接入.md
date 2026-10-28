@@ -8,15 +8,15 @@ Agent 运行时含会话、工具和执行控制；模型 API 通常只负责推
 Connector 是自定义平台协议，adapter 桥接上游差异；OpenAI-compatible endpoint 不代表兼容全部 CLI 或工具权限。
 runner 在 Windows/Linux 用户设备主动出站 WSS，后端独立部署；不把本地 stdio 或 CLI 端口暴露公网。
 
-| 候选 | 计划路径 | 实现前核对 | 当前状态 |
+| 候选 | 计划路径 | 实现前核对 | 当前状态（2026-10-28 实测） |
 | --- | --- | --- | --- |
-| Hermes | 评估本地 API server 的 HTTP 与会话能力 | 版本、隔离、流式、工具、取消与审批 | 未启动本项目业务连接 |
-| Codex | 本地 runner 封装 app-server stdio | 消息映射、线程隔离、审批、取消、版本 | 未启动本项目 app-server 业务 |
-| Claude | 官方允许的 API/运行时 adapter 待选 | 可用接口、许可、工具与取消 | 未核对具体接入协议 |
+| ZCode | 每次 spawn `zcode -p`，用 `--resume <sess_...>` 续接 | 协议、许可、取消与审批 | **CLI 能力已实测通过**（0.17.0/3.16.2）：`-p` 一次性、`--json` 返回 sessionId、`--resume` 跨目录续接、`--mode` 分级（plan/edit/yolo）、写文件与执行 shell 均验证；适配器未实现 |
+| Codex | 本地 runner 封装 app-server stdio，或 `exec` + `resume` | 消息映射、线程隔离、审批、取消、版本 | 二进制在位（0.165.0），app-server 握手未跑通 |
+| Hermes | 评估 `hermes serve` 的 JSON-RPC/WebSocket 或一次性模式 | 版本、隔离、流式、工具、取消与审批 | 二进制在位（v0.22.5），`serve` 默认 `127.0.0.1:9119`；**主机上已有用户在跑的 gateway 实例，不得触碰** |
+| Claude | 官方允许的 API/运行时 adapter 待选 | 可用接口、许可、工具与取消 | 目标主机未安装 |
 | Gemini | 官方允许的 API/运行时 adapter 待选 | 版本、权限及会话隔离 | 未核对具体接入协议 |
-| ZCode | 依据官方产品与配置资料调查 | 协议、许可、取消与审批 | 候选，无通用扫码 API 承诺 |
 
-上游事实及固定来源编号仅在[设计决策与验收](设计决策与验收.md)说明；当前主机登录状态不作为业务连接证据。
+实测详情与验收标准见[产品需求](产品需求.md) §4 与 §11。上游事实及固定来源编号仅在[设计决策与验收](设计决策与验收.md)说明；当前主机登录状态不作为业务连接证据。
 AIChat 与 AgentForge 无已集成关系；未来编排器也必须使用同一授权入口，不能旁路平台权限。
 
 ## 配对对象与状态
@@ -114,7 +114,7 @@ token 续期失败只重试认证，不把未确认任务重新执行；human �
 | task.received | 服务端 → runner | request_id、run_id、attempt_id、accepted_delta_seq、state；仅持久化接收回执 |
 | task.resume | runner → 服务端 | 上述标识、local_state、last_acked_delta_seq；请求状态核对，不能自行续跑 |
 | task.resume.result | 服务端 → runner | 当前 state、有效 epoch、next_delta_seq、may_continue；仅有效 running attempt 可继续 |
-| tool.approval.request | runner → 服务端 | run_id、attempt_id、fencing_epoch、action_digest、action_summary、policy_version；先暂停操作 |
+| tool.approval.request | runner → 服务端 | run_id、attempt_id、fencing_epoch、action_digest、action_summary、policy_version；先暂停操作。**未实现，本版本不做** |
 | tool.approval.result | 服务端 → runner | approval_id、action_digest、decision、expires_at、policy_version；匹配且未过期才允许 |
 
 context 是服务端按成员区间交集选定的 message 摘要/正文及独立 runtime_session_key，不是任意查询历史的凭证。

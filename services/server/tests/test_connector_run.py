@@ -56,7 +56,7 @@ async def test_connector_run_full_path(client, ctx, monkeypatch):
         assert claimed is not None
         run, attempt = claimed
         assert run.id == run_id and attempt.mode == "connector"
-        offer = runs.build_offer(run, attempt)
+        offer = await runs.build_offer(run, attempt)
         offer["context"] = [{"seq": i.seq, "text": i.text} for i in await runs.context_items(run.id)]
         assert any(c["seq"] == 1 for c in offer["context"])  # 上下文包含触发消息
         await session.commit()

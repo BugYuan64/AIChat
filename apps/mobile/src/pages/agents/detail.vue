@@ -17,6 +17,12 @@
           </view>
           <view v-else><EmptyState icon="link-2" title="选择一种方式，让搭档开始工作" description="使用模型 API 直接接入，或在外部连接器发起配对。" /><view class="binding-choices"><UiButton icon="bot" @click="bindingVisible = true">绑定模型 API</UiButton><UiButton variant="secondary" icon="scan-line" @click="openPairing">配对连接器</UiButton></view></view>
         </SectionPanel>
+        <SectionPanel title="执行权限" description="连接器以该权限在主机上运行 CLI。默认只允许读取与规划。" icon="shield-check" :tone="policyMode === 'plan' ? 'mint' : 'danger'">
+          <view class="data-row"><view class="data-copy"><text class="data-title">{{ modeLabel(policyMode) }}</text><text class="data-description">{{ modeDescription(policyMode) }}</text></view><StatusBadge :tone="policyMode === 'plan' ? 'success' : policyMode === 'yolo' ? 'danger' : 'warning'">{{ policyMode }}</StatusBadge></view>
+          <text class="panel-hint">工作目录：{{ agent.policy?.workspace_dir || '未设置（使用连接器默认目录）' }}</text>
+          <InlineNotice v-if="policyMode === 'yolo'" tone="danger" title="当前为完全委托">CLI 将自动批准所有操作，包括文件写入与命令执行，无需再向你确认。</InlineNotice>
+          <view class="button-row"><UiButton variant="secondary" size="small" icon="square-pen" @click="openPolicy">调整权限</UiButton></view>
+        </SectionPanel>
         <SectionPanel title="使用授权" description="默认只有你可以使用这个 AI，按需授权给其他人。" icon="shield-check">
           <view v-for="g in grants" :key="g.human_account_id" class="data-row"><AccountAvatar :name="g.account?.display_name || g.account?.handle || '?'" size="small" /><view class="data-copy"><text class="data-title">{{ g.account?.display_name || g.account?.handle || g.human_account_id }}</text><text class="data-description">@{{ g.account?.handle || g.human_account_id }}</text></view><UiButton variant="danger" size="small" @click="revokeGrant(g)">撤销</UiButton></view>
           <text v-if="!grants.length" class="panel-hint">目前没有其他被授权用户。</text>
@@ -32,6 +38,18 @@
       </view>
     </view>
     <template #overlay>
+      <BottomSheet :open="policyVisible" title="执行权限" @close="policyVisible = false">
+        <view class="sheet-form">
+          <InlineNotice v-if="policyError" tone="danger">{{ policyError }}</InlineNotice>
+          <text class="panel-hint">权限越高，CLI 能对你主机做的改动越大。不确定时保持「只读规划」。</text>
+          <NativeButton v-for="opt in POLICY_OPTIONS" :key="opt.value" class="mode-option" :aria-pressed="policyForm.permission_mode === opt.value" @click="policyForm.permission_mode = opt.value">
+            <view class="data-copy"><text class="data-title">{{ opt.label }}</text><text class="data-description">{{ opt.description }}</text></view>
+            <view class="radio-dot" :class="{ checked: policyForm.permission_mode === opt.value }"><view v-if="policyForm.permission_mode === opt.value" class="radio-dot-inner" /></view>
+          </NativeButton>
+          <view class="field"><label class="field-label">工作目录（可选）</label><input v-model="policyForm.workspace_dir" class="input" aria-label="工作目录" placeholder="留空则使用连接器默认目录" /></view>
+        </view>
+        <template #footer><UiButton class="wide-button" :loading="savingPolicy" @click="savePolicy">{{ savingPolicy ? '正在保存…' : '保存权限设置' }}</UiButton></template>
+      </BottomSheet>
       <BottomSheet :open="editVisible" title="编辑 AI 档案" @close="editVisible = false"><view class="sheet-form"><view class="field"><label class="field-label">名称</label><input v-model="editForm.display_name" class="input" aria-label="AI 名称" :maxlength="64" /></view><label class="field-label">账号状态</label><view class="button-row"><UiButton :variant="editForm.status === 'active' ? 'primary' : 'secondary'" @click="editForm.status = 'active'">启用</UiButton><UiButton :variant="editForm.status === 'disabled' ? 'danger' : 'secondary'" @click="editForm.status = 'disabled'">停用</UiButton></view></view><template #footer><UiButton class="wide-button" @click="saveEdit">保存档案</UiButton></template></BottomSheet>
       <BottomSheet :open="bindingVisible" title="绑定模型 API" @close="closeBinding"><view class="sheet-form"><InlineNotice v-if="actionError" tone="danger">{{ actionError }}</InlineNotice><view class="field"><label class="field-label">供应商代码</label><input v-model="bindForm.provider_code" class="input" aria-label="供应商代码" placeholder="管理员预配置的 provider_code" /></view><view class="field"><label class="field-label">模型名称</label><input v-model="bindForm.model_name" class="input" aria-label="模型名称" placeholder="输入供应商支持的模型名" /></view><view class="field"><label class="field-label">API 密钥</label><input v-model="bindForm.credential" class="input" password aria-label="API 密钥" placeholder="仅提交至服务器，不在本地存储" /></view><view class="field"><label class="field-label">系统提示词（可选）</label><textarea v-model="bindForm.system_prompt" class="textarea" aria-label="系统提示词" :maxlength="2000" /></view><text class="panel-hint">连接测试通过后才会启用。密钥由服务器加密保存。</text></view><template #footer><UiButton class="wide-button" :loading="binding" @click="bindModel">{{ binding ? '正在测试连接…' : '测试并启用' }}</UiButton></template></BottomSheet>
     </template>
@@ -76,6 +94,54 @@ const bindForm = ref({ provider_code: '', model_name: '', credential: '', system
 const grants = computed<AgentGrant[]>(() => agent.value?.grants ?? []);
 const grantHandle = ref('');
 const connectors = ref<AgentConnector[]>([]);
+
+/** 执行权限：默认 plan，与后端默认一致 */
+const policyVisible = ref(false);
+const policyError = ref('');
+const savingPolicy = ref(false);
+const policyForm = ref<{ permission_mode: string; workspace_dir: string }>({ permission_mode: 'plan', workspace_dir: '' });
+
+const POLICY_OPTIONS = [
+  { value: 'plan', label: '只读规划', description: '只能阅读与给出方案，不写文件、不执行命令' },
+  { value: 'edit', label: '可控写入', description: '可以修改文件；命令执行仍受 CLI 自身约束' },
+  { value: 'yolo', label: '完全委托', description: '自动批准一切操作，包括命令执行。谨慎使用' },
+] as const;
+
+const policyMode = computed(() => agent.value?.policy?.permission_mode ?? 'plan');
+
+function modeLabel(mode: string): string {
+  return POLICY_OPTIONS.find((o) => o.value === mode)?.label ?? mode;
+}
+
+function modeDescription(mode: string): string {
+  return POLICY_OPTIONS.find((o) => o.value === mode)?.description ?? '';
+}
+
+function openPolicy() {
+  policyError.value = '';
+  policyForm.value = {
+    permission_mode: policyMode.value,
+    workspace_dir: agent.value?.policy?.workspace_dir ?? '',
+  };
+  policyVisible.value = true;
+}
+
+async function savePolicy() {
+  if (savingPolicy.value) return;
+  savingPolicy.value = true;
+  policyError.value = '';
+  try {
+    agent.value = await agentsApi.setPolicy(agentId.value, {
+      permission_mode: policyForm.value.permission_mode,
+      workspace_dir: policyForm.value.workspace_dir.trim() || null,
+    });
+    policyVisible.value = false;
+  } catch (err) {
+    policyError.value = describeError(err);
+  } finally {
+    savingPolicy.value = false;
+  }
+}
 
 onLoad((options) => {
   agentId.value = options?.id ?? '';
@@ -230,4 +296,4 @@ function revokeConnector(c: AgentConnector) {
 function openPairing() { uni.navigateTo({ url: '/pages/pairing/scan' }); }
 function closeBinding() { if (binding.value) return; bindingVisible.value = false; bindForm.value.credential = ''; }
 </script>
-<style scoped>.agent-bio { display: block; margin-top: 20px; color: var(--text-secondary); font-size: 14px; line-height: 1.7; }.binding-symbol { width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 16px; background: var(--accent-soft); }.binding-summary > .panel-hint { margin-top: 15px; }.binding-choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }.grant-form { display: flex; align-items: center; gap: 10px; margin-top: 18px; }.grant-form > .input { flex: 1; min-width: 0; }.connector-row { padding-bottom: 18px; border-bottom: 1px solid var(--line); }.connector-row:last-child { border-bottom: 0; }.connector-row .data-row { border-bottom: 0; }.sheet-form { padding: 0 22px 22px; }.sheet-form > .inline-notice { margin-bottom: 16px; }</style>
+<style scoped>.agent-bio { display: block; margin-top: 20px; color: var(--text-secondary); font-size: 14px; line-height: 1.7; }.binding-symbol { width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 16px; background: var(--accent-soft); }.binding-summary > .panel-hint { margin-top: 15px; }.binding-choices { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }.grant-form { display: flex; align-items: center; gap: 10px; margin-top: 18px; }.grant-form > .input { flex: 1; min-width: 0; }.connector-row { padding-bottom: 18px; border-bottom: 1px solid var(--line); }.connector-row:last-child { border-bottom: 0; }.connector-row .data-row { border-bottom: 0; }.sheet-form { padding: 0 22px 22px; }.sheet-form > .inline-notice { margin-bottom: 16px; }.mode-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-top: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); text-align: left; }.mode-option[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }.radio-dot { flex: 0 0 20px; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 50%; }.radio-dot.checked { border-color: var(--accent); background: var(--accent); }.radio-dot-inner { width: 8px; height: 8px; border-radius: 50%; background: var(--surface); }</style>

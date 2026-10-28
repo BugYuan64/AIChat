@@ -47,7 +47,7 @@ async def dispatch_loop(ctx: AppContext) -> None:
                     connector_id = None
                     if attempt.mode == "connector":
                         connector_id = attempt.connector_id
-                        offer = runs.build_offer(run, attempt)
+                        offer = await runs.build_offer(run, attempt)
                         offer["context"] = [
                             {
                                 "seq": item.seq,

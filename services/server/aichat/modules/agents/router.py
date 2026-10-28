@@ -6,6 +6,7 @@ from aichat.core.deps import AuthHuman, current_human, require_admin
 from aichat.modules.agents.schemas import (
     AgentCreateIn,
     AgentPatchIn,
+    AgentPolicyIn,
     GrantIn,
     ModelBindingIn,
     ProviderEndpointIn,
@@ -38,6 +39,23 @@ async def list_agents(scope: str = "owned", auth: AuthHuman = Depends(current_hu
 async def get_agent(agent_id: str, auth: AuthHuman = Depends(current_human),
                     service: AgentsService = Depends(svc)):
     return await service.get_agent_view(agent_id, auth.account_id)
+
+
+@router.patch("/agents/{agent_id}/policy")
+async def set_agent_policy(agent_id: str, body: AgentPolicyIn,
+                           auth: AuthHuman = Depends(current_human),
+                           service: AgentsService = Depends(svc)):
+    """设置 CLI 执行权限模式与工作目录（仅所有者）。"""
+    profile = await service.set_policy(agent_id, auth.account_id,
+                                       body.permission_mode, body.workspace_dir)
+    return {
+        "agent_id": profile.account_id,
+        "policy": {
+            "permission_mode": profile.permission_mode,
+            "workspace_dir": profile.workspace_dir,
+            "policy_version": profile.policy_version,
+        },
+    }
 
 
 @router.patch("/agents/{agent_id}")

@@ -10,7 +10,11 @@ BindingMode = Enum("model_api", "connector", name="binding_mode")
 
 
 class AgentProfile(Base):
-    """AI 账号档案：account_id 指向 kind=ai 的 Account，owner 是人类账号。"""
+    """AI 账号档案：account_id 指向 kind=ai 的 Account，owner 是人类账号。
+
+    permission_mode / workspace_dir 存在这里而不是 RuntimeBinding：重新配对会
+    删除并重建 RuntimeBinding，若配置挂在绑定上，每次换设备都要重设一遍。
+    """
 
     __tablename__ = "agent_profile"
 
@@ -18,6 +22,8 @@ class AgentProfile(Base):
     owner_account_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="granted")
     system_prompt: Mapped[str | None] = mapped_column(String(16384))
+    permission_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="plan")
+    workspace_dir: Mapped[str | None] = mapped_column(String(512))
     policy_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)

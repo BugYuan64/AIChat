@@ -45,6 +45,19 @@ export function revokeBinding(agent_id: string) {
   return request<unknown>({ url: `/v1/agents/${encodeURIComponent(agent_id)}/binding/revoke`, method: 'POST' });
 }
 
+/**
+ * 设置 CLI 执行权限模式与工作目录。
+ * 默认 plan（只读/规划）；提升到 edit/yolo 会让连接器以更高权限运行 CLI。
+ */
+export async function setPolicy(agent_id: string, payload: { permission_mode: string; workspace_dir?: string | null }) {
+  await request<unknown>({
+    url: `/v1/agents/${encodeURIComponent(agent_id)}/policy`,
+    method: 'PATCH',
+    data: payload,
+  });
+  return getAgent(agent_id);
+}
+
 /** 授权某人类账号使用该 AI */
 export function grantUse(agent_id: string, human_account_id: string) {
   return request<unknown>({

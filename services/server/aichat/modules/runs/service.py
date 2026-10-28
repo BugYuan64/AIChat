@@ -192,7 +192,21 @@ class RunsService:
             return run, attempt
         return None
 
-    def build_offer(self, run: Run, attempt: RunAttempt) -> dict:
+    async def build_offer(self, run: Run, attempt: RunAttempt) -> dict:
+        """构造派发帧。
+
+        三样东西必须随帧下发，否则连接器侧只能靠猜：
+        - system_prompt：连接器模式下 RuntimeBinding 由配对创建、不带它，
+          此前适配器永远拿到 None，系统提示词在连接器模式静默失效。
+        - deadline_at：与 policy 里的 deadline_seconds 一并给出，避免两端
+          对超时的认知不一致。
+        - permission_mode / workspace_dir：CLI 的执行权限由平台下发，
+          不能让适配器用自己进程环境的默认值（那会是 CLI 自身的 yolo）。
+        """
+        from aichat.modules.agents.models import AgentProfile, RuntimeBinding
+
+        binding = await self.session.get(RuntimeBinding, run.agent_account_id)
+        agent_policy = await self.session.get(AgentProfile, run.agent_account_id)
         return {
             "type": "run.offer",
             "event_id": new_id(),
@@ -204,9 +218,15 @@ class RunsService:
             "fencing_token": attempt.fencing_token,
             "binding_generation": run.binding_generation,
             "lease_until": _iso(attempt.lease_until),
+            "deadline_at": _iso(run.deadline_at),
             "agent_id": run.agent_account_id,
             "conversation_id": run.conversation_id,
             "trigger_message_id": run.trigger_message_id,
+            "system_prompt": binding.system_prompt if binding is not None else None,
+            "execution_policy": {
+                "permission_mode": agent_policy.permission_mode if agent_policy is not None else "plan",
+                "workspace_dir": agent_policy.workspace_dir if agent_policy is not None else None,
+            },
             "policy": run.policy_snapshot,
         }
 
@@ -503,6 +523,14 @@ class RunsService:
         )).all())
         for run, attempt in rows:
             if attempt is not None:
+                # 连接器侧的 CLI 进程可能还在跑。服务端已经认定失败，
+                # 必须显式要求它停下来，否则会在主机上留下孤儿进程。
+                if attempt.mode == "connector" and attempt.connector_id:
+                    await self.ctx.hub.send_to_connector(
+                        attempt.connector_id,
+                        {"type": "run.cancel", "run_id": run.id,
+                         "execution_id": attempt.execution_id, "reason": "deadline_exceeded"},
+                    )
                 attempt.state = "expired"
                 attempt.finished_at = now
             run.state = "recovery_required" if run.state == "running" else "cancelled"

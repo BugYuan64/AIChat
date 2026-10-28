@@ -83,9 +83,9 @@ async def cmd_run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     adapter_kind = args.adapter or credentials.get("adapter_kind") or "echo"
-    adapter = build_adapter(adapter_kind)
-    print(f"使用适配器：{adapter_kind}（连接器 {credentials.get('connector_id')}）")
     ledger = Ledger(config.ledger_path)
+    adapter = build_adapter(adapter_kind, ledger=ledger)
+    print(f"使用适配器：{adapter_kind}（连接器 {credentials.get('connector_id')}）")
     try:
         async with httpx.AsyncClient(timeout=20.0) as http:
             tokens = TokenManager(credentials, config.server_base_url, http)

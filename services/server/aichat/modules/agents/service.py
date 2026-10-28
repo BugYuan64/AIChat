@@ -85,6 +85,28 @@ class AgentsService:
             items.append(agent_out(account, profile, binding, connector))
         return items
 
+    # ---- 执行权限（CLI agent） ----
+
+    async def set_policy(
+        self, agent_account_id: str, owner_id: str, permission_mode: str,
+        workspace_dir: str | None,
+    ) -> AgentProfile:
+        """设置 CLI 执行权限与工作目录，立即生效于后续 run。"""
+        profile = await self.require_owner(agent_account_id, owner_id)
+        previous = profile.permission_mode
+        profile.permission_mode = permission_mode
+        profile.workspace_dir = workspace_dir or None
+        profile.policy_version += 1
+        await emit(self.session, "binding.changed",
+                   {"agent_account_id": agent_account_id, "permission_mode": permission_mode,
+                    "policy_version": profile.policy_version},
+                   subject_account_ids=[owner_id])
+        await self.audit.record("agent.policy_set", "agent", agent_account_id,
+                                actor_account_id=owner_id,
+                                summary={"from": previous, "to": permission_mode,
+                                         "workspace_dir": profile.workspace_dir})
+        return profile
+
     # ---- 模型绑定 ----
 
     async def set_model_binding(

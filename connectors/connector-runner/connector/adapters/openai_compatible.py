@@ -55,7 +55,13 @@ class OpenAICompatibleAdapter:
         self._cancelled = False
         self._client = httpx.AsyncClient(timeout=timeout)
 
-    async def run(self, context: list[dict], system_prompt: str | None) -> AsyncIterator[str]:
+    async def run(
+        self,
+        context: list[dict],
+        system_prompt: str | None,
+        session_key: str | None = None,
+        execution_policy: dict | None = None,
+    ) -> AsyncIterator[str]:
         self._cancelled = False
         messages: list[dict] = []
         if system_prompt:

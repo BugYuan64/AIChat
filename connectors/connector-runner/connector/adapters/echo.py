@@ -13,7 +13,13 @@ class EchoAdapter:
         self._chunk_delay = chunk_delay
         self._cancelled = False
 
-    async def run(self, context: list[dict], system_prompt: str | None) -> AsyncIterator[str]:
+    async def run(
+        self,
+        context: list[dict],
+        system_prompt: str | None,
+        session_key: str | None = None,
+        execution_policy: dict | None = None,
+    ) -> AsyncIterator[str]:
         self._cancelled = False
         text = "\n".join(str(item.get("text", "")) for item in context)
         for ch in text:  # 逐字产出，模拟流式

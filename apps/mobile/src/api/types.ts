@@ -301,6 +301,14 @@ export interface AgentBinding {
   enabled: boolean;
 }
 
+/** CLI agent 执行权限：决定连接器以何种权限运行（对应 CLI 的 --mode） */
+export type PermissionMode = 'plan' | 'edit' | 'build' | 'yolo' | 'guarded';
+
+export interface AgentPolicy {
+  permission_mode: PermissionMode;
+  workspace_dir: string | null;
+}
+
 /** AI 使用授权 */
 export interface AgentGrant {
   grant_id?: string;
@@ -318,6 +326,8 @@ export interface Agent {
   bio?: string;
   status: string;
   binding?: AgentBinding;
+  /** CLI 执行权限（所有者可见） */
+  policy?: AgentPolicy | null;
   online?: boolean;
   /** 服务端若在详情中附带授权列表则用于渲染 */
   grants?: AgentGrant[];

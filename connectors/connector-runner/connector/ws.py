@@ -69,6 +69,22 @@ def _to_int(value: object) -> int | None:
         return None
 
 
+def _resolve_deadline(frame_deadline: object, policy: dict) -> float | None:
+    """解析任务截止时刻。
+
+    优先用帧顶层的 deadline_at（服务端给的绝对时刻）；回退到 policy 里的
+    deadline_seconds（相对时长）。两侧字段名不一致曾导致 runner 的超时检查
+    恒为 None，它以为可以无限跑，而服务端已经判超时——两边认知不一致。
+    """
+    absolute = _parse_rfc3339(frame_deadline) or _parse_rfc3339(policy.get("deadline_at"))
+    if absolute is not None:
+        return absolute
+    seconds = _to_int(policy.get("deadline_seconds"))
+    if seconds is not None and seconds > 0:
+        return time.time() + seconds
+    return None
+
+
 @dataclass
 class ActiveRun:
     """一个在途执行（含 asyncio 任务与控制标志）。"""
@@ -77,6 +93,9 @@ class ActiveRun:
     run_id: str
     attempt_no: Any = None
     fencing_token: Any = None
+    conversation_id: str | None = None
+    deadline_at: float | None = None
+    execution_policy: dict = field(default_factory=dict)
     context: list[dict] = field(default_factory=list)
     system_prompt: str | None = None
     policy: dict = field(default_factory=dict)
@@ -290,6 +309,9 @@ class ConnectorSession:
             run_id=run_id,
             attempt_no=attempt_no,
             fencing_token=fencing_token,
+            conversation_id=frame.get("conversation_id"),
+            deadline_at=_resolve_deadline(frame.get("deadline_at"), policy),
+            execution_policy=dict(frame.get("execution_policy") or {}),
             context=context,
             system_prompt=system_prompt,
             policy=policy,
@@ -309,11 +331,13 @@ class ConnectorSession:
             self._ledger.upsert(run.execution_id, status="running")
 
             max_output_bytes = _to_int(run.policy.get("max_output_bytes"))
-            deadline_ts = _parse_rfc3339(run.policy.get("deadline_at"))
+            deadline_ts = run.deadline_at
             total_bytes = 0
             truncated = False
 
-            async for piece in self.adapter.run(run.context, run.system_prompt):
+            async for piece in self.adapter.run(
+                run.context, run.system_prompt, run.conversation_id, run.execution_policy
+            ):
                 if run.stale or run.cancel_requested:
                     break
                 piece_bytes = len(piece.encode("utf-8"))

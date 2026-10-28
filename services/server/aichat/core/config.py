@@ -37,11 +37,11 @@ class Settings(BaseSettings):
     run_lease_seconds: int = 30
     run_lease_renew_seconds: int = 10
     run_dispatch_ack_seconds: int = 10
-    run_deadline_seconds: int = 120
-    run_queue_deadline_seconds: int = 5 * 60
+    # CLI agent（zcode/codex/hermes）单次任务常需数分钟，120 秒会把正常任务误判为超时
+    run_deadline_seconds: int = 1800
+    run_queue_deadline_seconds: int = 60 * 60
     run_max_attempts: int = 3
     max_context_messages: int = 30
-    max_agent_concurrent_runs: int = 1
     max_human_active_runs: int = 2
     max_agent_queued_runs: int = 20
     max_mentions_per_message: int = 3
